@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Circle Dance — Brown University</title>
+  <meta name="description" content="A web space to explore and appreciate Circle Dance on Brown University's campus. Project by Yeowon, Erin & Jaclyn.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-view="hero">
+  <div class="viewport">
+    <div class="stage" id="stage">
+
+      <!-- ===== Shared header ===== -->
+      <a class="title" href="#hero" aria-label="Circle Dance — home">
+        <span class="title__line title__line--xl">Web Space to</span>
+        <span class="title__line title__line--l">Explore and Appreciate</span>
+        <span class="title__name">Circle Dance</span>
+        <span class="title__line title__line--campus">on Brown University’s Campus.</span>
+      </a>
+
+      <p class="credits">PROJECT BY<br>YEOWON,<br>ERIN,<br>&amp; JACLYN</p>
+
+      <button class="sound" id="soundToggle" type="button" aria-pressed="false">
+        <span class="sound__label" id="soundLabel">SOUND OFF</span>
+        <img class="sound__ear sound__ear--off" src="assets/ear-off.png" width="33" height="51" alt="">
+        <img class="sound__ear sound__ear--on" src="assets/ear-on.png" width="31" height="49" alt="">
+      </button>
+      <p class="sound__caption" aria-hidden="true">AUDIBLE EXPERIENCE OF<br>SURROUNDING AREA</p>
+
+      <!-- ===== HERO ===== -->
+      <section class="view view--hero" data-view="hero" aria-label="Introduction">
+        <button class="hero__figures" type="button" data-go="history" aria-label="Enter: explore the history of Circle Dance">
+          <img src="assets/hero-figures.png" width="939" height="720" alt="Eleven sculpted figures holding hands in a circle">
+        </button>
+        <p class="caption caption--light">CLICK PAGE</p>
+      </section>
+
+      <!-- ===== HISTORY ===== -->
+      <section class="view view--explore" data-view="history" aria-label="History">
+        <div class="panel" aria-live="polite">
+          <p class="panel__prompt">HOVER A FIGURE</p>
+          <img class="panel__img" alt="">
+          <p class="panel__figure-label"></p>
+        </div>
+        <div class="figures" data-figures>
+          <img class="figures__img" src="assets/figures.png" width="612" height="617" alt="">
+        </div>
+        <p class="caption">HISTORICAL INFORMATION ABOUT CIRCLE DANCE</p>
+      </section>
+
+      <!-- ===== INFOGRAPHICS ===== -->
+      <section class="view view--explore" data-view="infographics" aria-label="Infographics">
+        <div class="panel" aria-live="polite">
+          <p class="panel__prompt">HOVER A FIGURE</p>
+          <img class="panel__img" alt="">
+          <p class="panel__figure-label"></p>
+        </div>
+        <div class="figures" data-figures>
+          <img class="figures__img" src="assets/figures.png" width="612" height="617" alt="">
+        </div>
+        <p class="caption">INFOGRAPHICS MADE WITH DATA GATHERED AT SITE</p>
+      </section>
+
+      <!-- ===== GALLERY ===== -->
+      <section class="view view--gallery" data-view="gallery" aria-label="Virtual gallery">
+        <form class="share" id="shareForm" novalidate>
+          <h2 class="share__title">SHARE YOUR PHOTO AND COMMENT</h2>
+          <p class="share__intro">Become part of Circle Dance by uploading a photo and a memory of your experience.</p>
+
+          <label class="drop" id="dropZone">
+            <input class="drop__input" id="photoInput" type="file" accept="image/png, image/jpeg">
+            <img class="drop__preview" id="photoPreview" alt="">
+            <span class="drop__text">
+              <span class="drop__main">Upload a JPG or PNG</span>
+              <span class="drop__sub">Drop Your Photo Here</span>
+            </span>
+          </label>
+
+          <label class="share__label" for="memoryInput">Share Your Experience</label>
+          <textarea class="share__memory" id="memoryInput" maxlength="240" placeholder="What does Circle Dance mean to you?"></textarea>
+
+          <button class="share__submit" type="submit">ADD TO THE CIRCLE</button>
+          <p class="share__msg" id="shareMsg" role="status"></p>
+        </form>
+
+        <ul class="tiles" id="tiles" aria-label="Shared memories"></ul>
+
+        <p class="caption">VIRTUAL CIRCLE DANCE GALLERY</p>
+      </section>
+
+      <!-- ===== Shared navigation ===== -->
+      <nav class="nav" aria-label="Sections">
+        <a class="nav__btn" href="#history" data-nav="history">history</a>
+        <a class="nav__btn" href="#infographics" data-nav="infographics">infographics</a>
+        <a class="nav__btn" href="#gallery" data-nav="gallery">gallery</a>
+      </nav>
+
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
