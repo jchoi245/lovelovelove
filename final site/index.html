@@ -1,0 +1,1740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle Dance</title>
+<meta name="description" content="Circle Dance brings people together — an interactive look at how visitors move around, touch, and gather at Tom Friedman's sculpture.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Enriqueta:wght@600&family=MuseoModerno:wght@300;400&family=Epunda+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Lemonada:wght@600;700&family=Lexend+Mega:wght@200;300&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.11"></script>
+<style>
+  :root {
+    --cream: #f4f4f5;
+    --ink: #111;
+    --leaf: #a1c78d;
+    --t: 700ms;
+    color-scheme: light;
+  }
+  html, body { margin: 0; height: 100%; background: var(--cream); overflow: clip; }
+  body { font-family: 'Epunda Sans', system-ui, sans-serif; color: var(--ink); }
+
+  /* The design is a single 1512×982 artboard; JS scales it to fit the window. */
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1512px; height: 982px;
+    transform-origin: center center;
+    background: var(--cream);
+  }
+
+  /* ---------- state layers ---------- */
+  .layer { position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none;
+           transition: opacity var(--t) ease, visibility 0s linear var(--t); }
+  .layer > * { pointer-events: auto; }
+  .layer.passive > * { pointer-events: none; }
+  /* several layers can be on at once — each ring circle adds an on-<name> class to body */
+  body.on-history  .layer[data-for~="history"],
+  body.on-emotion  .layer[data-for~="emotion"],
+  body.on-duration .layer[data-for~="duration"],
+  body.on-movement .layer[data-for~="movement"],
+  body.on-group    .layer[data-for~="group"],
+  body.on-touch    .layer[data-for~="touch"] {
+    opacity: 1; visibility: visible; transition: opacity var(--t) ease, visibility 0s;
+  }
+
+  /* only the most recently opened layer shows its heading */
+  .layer .title, .layer .subtitle { opacity: 0; transition: opacity 500ms ease; }
+  body[data-top="history"]  .layer[data-for~="history"]  :is(.title, .subtitle),
+  body[data-top="emotion"]  .layer[data-for~="emotion"]  :is(.title, .subtitle),
+  body[data-top="duration"] .layer[data-for~="duration"] :is(.title, .subtitle),
+  body[data-top="movement"] .layer[data-for~="movement"] :is(.title, .subtitle),
+  body[data-top="group"]    .layer[data-for~="group"]    :is(.title, .subtitle),
+  body[data-top="touch"]    .layer[data-for~="touch"]    :is(.title, .subtitle) { opacity: 1; }
+
+  /* each layer's heading now lives in the shared caption (bottom left) and ring label, not on the layer */
+  .layer .title, .layer .subtitle { display: none; }
+
+
+  /* ---------- 6 · physical touch ---------- */
+  .tring { position: absolute; transform-origin: center; animation: flash 3.2s ease-in-out infinite; }
+  .tring img { width: 100%; height: 100%; display: block; }
+  @keyframes flash {
+    0%, 100% { opacity: .15; transform: scale(.55); }
+    35%      { opacity: 1;   transform: scale(1); }
+    70%      { opacity: .55; transform: scale(.9); }
+  }
+  .spot { position: absolute; border-radius: 50%; cursor: default; }
+  .spot-label { position: absolute; width: 98px; text-align: center; font-weight: 500; font-size: 14px;
+                line-height: 1.28; letter-spacing: -0.308px; opacity: 0; transform: translateY(-4px);
+                transition: opacity 250ms, transform 250ms; pointer-events: none; }
+  .spot:hover + .spot-label, .spot:focus-visible + .spot-label { opacity: 1; transform: none; }
+
+  /* ---------- 2 · emotion ---------- */
+  /* ---------- parallax (as on wildflowers.garden): the scene drifts against the mouse in layers ----------
+     Each layer has its own depth and its own speed (set in the script), and holds its offset in --lx / --ly.
+     The grass, dancers, legends, titles and History stay put; a legend undoes its layer's drift. */
+  .layer:not(#history), .mv-shoe, .emo-sheet { --lx: 0px; --ly: 0px; translate: var(--lx) var(--ly); }
+  .mv-shoe { position: absolute; inset: 0; }            /* one sheet per shoe type, so each trail drifts on its own */
+  .layer:not(#history) .legend { translate: calc(var(--lx) * -1) calc(var(--ly) * -1); }
+  body.parallax-rest :is(.layer, .mv-shoe, .emo-sheet) { translate: none !important; }   /* while measuring the frame edges */
+
+  /* ---------- day / night ---------- */
+  /* night (Figma 26:6158): dark grey ground under the same green grass, black line and type */
+  html, body, #stage { transition: background-color 700ms ease; }
+  html.night, html.night body, body.night #stage { background: #4f4f4f; }
+  /* at night the black type and line work turns white (panels with their own light background keep black) */
+  body.night { --ink: #fff; }
+  #wordmark, #caption, #ring-label, #daynight-label, .slide-head, .layer .legend, .spot-label { transition: color 700ms ease; }
+  body.night :is(#wordmark, #caption, #ring-label, #daynight-label, .slide-head) { color: #fff; }
+  /* History's pre-blurred background follows the night ground and the white line */
+  .hist-backdrop, .hist-backdrop .hb-art img[src$="dancers.svg"] { transition: background-color 700ms ease, filter 700ms ease; }
+  body.night .hist-backdrop { background: #4f4f4f; }
+  body.night .hist-backdrop .hb-art img[src$="dancers.svg"] { filter: invert(1); }
+  #ring svg circle, #daynight svg, #dancers-svg path { transition: stroke 700ms ease; }
+  body.night #ring svg circle, body.night #daynight svg, body.night #dancers-svg path { stroke: #fff; }
+  #ear img, .icon-btn img { transition: filter 700ms ease; }
+  body.night #ear img, body.night .icon-btn img { filter: invert(1) brightness(2); }
+  /* the grass sits back at night (also in the History blur and in captures) */
+  #grass, .hist-backdrop .hb-art img[src$="grass.svg"] { transition: opacity 700ms ease; }
+  body.night #grass, body.night .hist-backdrop .hb-art img[src$="grass.svg"] { opacity: .4; }
+  .layer .n, .layer .night-only { display: none; }
+  body.night .layer .d { display: none; }
+  body.night .layer .n { display: inline; }
+  body.night .layer .night-only { display: block; }
+  body.night .layer .legend-card .tx.night-only { display: flex; }
+  /* a legend shows only the rows for the current mode (its own layout rules would otherwise show both) */
+  body:not(.night) .legend-card .night-only, body.night .legend-card .day-only { display: none; }
+  body.night .layer .day-only { display: none; }
+  #mv .mv-night { display: none; }
+  body.night #mv .mv-day { display: none; }
+  body.night #mv .mv-night { display: block; }
+  .emo-night { display: none; }
+  body.night .emo-day { display: none; }
+  body.night .emo-night { display: block; }
+  /* duration has a day set and a night set of eyes (Figma 57:13400 / 57:15925) */
+  .dur-night { display: none; }
+  body.night .dur-day { display: none; }
+  body.night .dur-night { display: block; }
+  /* night group size: fewer people pass alone or in big groups; pairs and small groups remain */
+  body.night .grp:has(img[src$="grp_F5.svg"]), body.night .grp:has(img[src$="grp_F10.svg"]),
+  body.night .grp:has(img[src$="grp_F8.svg"]), body.night .grp:has(img[src$="grp_F9.svg"]) { display: none; }
+  /* what's on: one chip per open view (newest at the bottom); clicking a chip turns that view off again */
+  #showing { position: absolute; right: 36px; top: 112px; z-index: 12; display: flex; flex-direction: column; align-items: flex-end;
+             gap: 6px; transition: opacity 300ms; }
+  #showing .lbl { font: 300 13px/1 'MuseoModerno', sans-serif; color: #000; margin-bottom: 2px; transition: color 700ms ease; }
+  body.night #showing .lbl { color: #fff; }
+  #showing .chip { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 14px; border: 1px solid #000; border-radius: 999px;
+                   background: rgba(255,255,255,.85); color: #000; font: 300 15px/1 'MuseoModerno', sans-serif; cursor: pointer;
+                   animation: chip-in 250ms ease-out; transition: background 200ms; }
+  #showing .chip:hover { background: #fff; }
+  #showing .chip .x { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--leaf); font-size: 13px; }
+  #showing .chip.all { background: none; border-style: dashed; padding-right: 14px; }
+  body.night #showing .chip.all { color: #fff; border-color: #fff; }
+  #showing .chip:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 2px; }
+  @keyframes chip-in { from { opacity: 0; transform: translateX(10px); } }
+  body:is(.decorating, .gallery-open) #showing { opacity: 0; pointer-events: none; }
+  /* the switch: a thin-line moon by day (go to night), a sun by night (go to day) */
+  #daynight { position: absolute; left: 1446px; top: 48px; width: 34px; height: 34px; z-index: 12; padding: 0; border: 0;
+              background: none; cursor: pointer; transition: transform 350ms cubic-bezier(.3,1.6,.5,1), opacity 300ms; }
+  #daynight:hover { transform: rotate(-15deg) scale(1.12); }
+  #daynight:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 4px; border-radius: 50%; }
+  #daynight svg { width: 100%; height: 100%; overflow: visible; }
+  #daynight .sun { display: none; }
+  body.night #daynight .sun { display: inline; }
+  body.night #daynight .moon { display: none; }
+  #daynight-label { position: absolute; left: 1463px; top: 92px; transform: translateX(-50%); margin: 0; z-index: 12;
+                    font: 300 15px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0; transition: opacity 200ms; pointer-events: none; }
+  #daynight:hover + #daynight-label, #daynight:focus-visible + #daynight-label { opacity: 1; }
+  body:is(.decorating, .gallery-open) :is(#daynight, #daynight-label) { opacity: 0; pointer-events: none; }
+  .emo-sheet { position: absolute; inset: 0; }
+  .emo-icon { position: absolute; transform-origin: 50% 50%; }
+  .emo-icon img { display: block; width: 100%; height: 100%; }
+
+  /* ---------- 4 · movement ---------- */
+  #mv { overflow: hidden; }   /* prints run off the edges of the frame, as in Figma */
+
+  /* ---------- legends: the most recently opened view shows its legend (bottom right, above the ear) ---------- */
+  .layer .legend { opacity: 0; pointer-events: none; transition: opacity 500ms ease; }
+  .layer .legend.on { opacity: 1; }
+
+  /* ---------- 5 · group size ---------- */
+  .dur-eye img { position: absolute; max-width: none; }
+  /* every legend is the same card: bottom right above the ear, a soft white ground, a fixed-width
+     column of shapes (each centred in its cell) and the labels lined up beside them */
+  .legend-card { position: absolute; right: 36px; bottom: 96px; display: grid; grid-template-columns: 48px auto;
+                 column-gap: 14px; row-gap: 8px; align-items: center; padding: 14px 20px 14px 14px; border-radius: 16px;
+                 background: rgba(255,255,255,.55); transition: background-color 700ms ease;
+                 font-weight: 500; font-size: 14px; line-height: 1.28; letter-spacing: -0.308px; white-space: nowrap; }
+  body.night .legend-card { background: rgba(255,255,255,.12); }
+  .legend-card .sw { width: 48px; height: 30px; display: grid; place-items: center; }
+  .legend-card .sw img { max-width: 48px; max-height: 30px; width: auto; height: auto; object-fit: contain; }
+  .legend-card .tx { display: flex; gap: 10px; align-items: baseline; }
+  .legend-card .val { opacity: .7; }
+  .spin { animation: spin 48s linear infinite; animation-play-state: paused; transform-origin: center; }
+  .spin.ccw { animation-direction: reverse; }
+  body.on-group .spin { animation-play-state: running; }   /* groups appear all at once and turn straight away */
+  @keyframes spin { to { rotate: 360deg; } }
+
+  /* ---------- 1 · history ---------- */
+  #hist-circle { position: absolute; left: 397px; top: 194px; width: 711px; height: 711px; border-radius: 50%;
+                 transform: scale(.6); opacity: 0; transition: transform 700ms cubic-bezier(.3,1.4,.5,1), opacity 400ms; }
+  body.on-history #hist-circle { transform: none; opacity: 1; }
+  /* The blurred background is a pre-blurred copy of the grass and sculpture held inside the circle, not a live
+     backdrop-filter: browsers skip backdrop blur while the circle animates, which made it pop in late. */
+  .hist-backdrop { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; background: var(--cream); }
+  .hist-backdrop .hb-art { position: absolute; left: -397px; top: -194px; width: 1512px; height: 982px; filter: blur(22px); }
+  .hist-backdrop .hb-art img { position: absolute; max-width: none; }
+  /* a soft, see-through white over the blurred scene (a little lighter touch at night, so the white text still reads) */
+  .hist-backdrop::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.4); transition: background-color 700ms ease; }
+  body.night .hist-backdrop::after { background: rgba(255,255,255,.12); }
+  /* the History layer itself never fades: a backdrop blur doesn't render while a parent is semi-transparent,
+     so fading the layer made the blur pop in late. The circle and heading do their own fading instead. */
+  .layer#history { opacity: 1; transition: visibility 0s linear 700ms; }
+  body.on-history .layer#history { transition: visibility 0s; }
+  .slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity 450ms ease, visibility 0s linear 450ms; }
+  .slide.on { opacity: 1; visibility: visible; transition: opacity 450ms ease 150ms, visibility 0s; }
+  /* while History is closed nothing inside it may catch the mouse (the slides and arrows set their own visibility) */
+  body:not(.on-history) #hist-circle > :not(.hist-backdrop), body:not(.on-history) #hist-circle > :not(.hist-backdrop) * { visibility: hidden !important; }
+  .slide-body { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .slide-head { margin: 0 0 30px; font-family: 'Epunda Sans', sans-serif; font-weight: 600; font-size: 23px; line-height: normal; color: #000; }
+  .slide-head .amp { font-family: 'Enriqueta', serif; font-weight: 600; }
+  .slide-text { margin: 0; max-width: 430px; font-size: 23px; line-height: 1.46; letter-spacing: -0.506px; }
+  .caption { position: absolute; text-align: center; font-size: 17px; line-height: 1.5; letter-spacing: -0.374px; margin: 0; }
+  .icon-btn { position: absolute; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer;
+              border-radius: 50%; transition: transform 200ms; }
+  .icon-btn img { width: 100%; height: 100%; display: block; }
+  .icon-btn:hover { transform: scale(1.25); }
+  .icon-btn:focus-visible { outline: 2px dashed #a58be0; outline-offset: 3px; }
+
+  /* ---------- wordmark, ring nav, label, caption ---------- */
+  #wordmark { position: absolute; left: 755.5px; top: 37px; width: 307px; transform: translateX(-50%); margin: 0; padding: 0;
+              border: 0; background: none; cursor: pointer; color: #000; text-align: center;
+              font: 400 55px/1 'MuseoModerno', sans-serif; }
+  #wordmark:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 6px; border-radius: 8px; }
+  #ring { position: absolute; left: 35px; top: 37px; width: 94.88px; height: 94.88px; }
+  #ring svg { position: absolute; inset: 0; overflow: visible; }
+  #ring svg circle { fill: transparent; transition: fill 250ms ease; }
+  #ring svg circle.hot, #ring svg circle.on { fill: var(--leaf); }
+  #ring svg circle.hot.on { fill: #7fae68; }
+  .dot { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; padding: 0; border: 0; border-radius: 50%;
+         background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .dot:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 2px; }
+  /* like the flower site's petal titles: one spot beside the ring, the word tilts to match the circle */
+  #ring-label { position: absolute; left: 206.36px; top: 90.19px; margin: 0; white-space: nowrap; pointer-events: none;
+                font: 300 17px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0;
+                transform: translate(-50%, -50%) rotate(var(--r, 0deg)); transform-origin: 50% 50%;
+                transition: opacity 200ms ease, transform 350ms cubic-bezier(.3,1.4,.5,1); }
+  #ring-label.on { opacity: 1; }
+  #caption { position: absolute; left: 36px; top: 931px; margin: 0; white-space: nowrap; color: #000;
+             font: 300 20px/1 'MuseoModerno', sans-serif; transition: opacity 300ms ease; }
+  #caption.swap { opacity: 0; }
+  /* the ring, title, caption and ear stay above the decorating board */
+  #ring, #wordmark, #caption, #ear, #ring-label { z-index: 12; }
+  #ring svg circle[data-c="0"] { stroke-width: 1.2; }
+  .dot.big { width: 32px; height: 32px; margin: -16px 0 0 -16px; }
+
+  /* ---------- decorate your own Circle Dance ---------- */
+  .deco-ui { position: absolute; opacity: 0; visibility: hidden; transition: opacity 400ms ease, visibility 0s linear 400ms; }
+  body.decorating .deco-ui { opacity: 1; visibility: visible; transition: opacity 400ms ease, visibility 0s; }
+  #board { inset: 0; z-index: 5; pointer-events: none; }
+  #board .sticker { pointer-events: auto; }
+  .sticker { transition: opacity 200ms ease; }
+  .sticker.snapping { opacity: .3; }
+  /* emotion colours that have snapped into the gaps of the outline (they sit under the line) */
+  #deco-fills { position: absolute; left: 0; top: 0; width: 1512px; height: 982px; overflow: visible; pointer-events: none; }
+  #deco-fills .fill { pointer-events: auto; cursor: grab; transform-box: fill-box; transform-origin: center;
+                      animation: fill-in 650ms cubic-bezier(.3,1.35,.5,1); }
+  #deco-fills .fill.out { animation: none; transition: opacity 180ms ease; opacity: 0; }
+  #fill-preview { opacity: 0; transition: opacity 220ms ease; pointer-events: none; }
+  #fill-preview.on { opacity: .55; }
+  @keyframes fill-in { from { opacity: .2; transform: scale(.6); } to { opacity: 1; transform: none; } }
+  .sticker { position: absolute; transform-origin: 50% 50%; cursor: grab; touch-action: none; user-select: none; }
+  .sticker img { display: block; width: 100%; height: 100%; pointer-events: none; -webkit-user-drag: none; }
+  .sticker.dragging { cursor: grabbing; }
+  .sticker .h { position: absolute; width: 18px; height: 18px; border-radius: 50%; border: 1px solid #000; background: #fff;
+                display: none; place-items: center; font: 300 13px/1 'MuseoModerno', sans-serif; scale: var(--inv, 1); }
+  .sticker.sel { outline: 1px dashed #000; outline-offset: 4px; }
+  .sticker.sel .h { display: grid; }
+  .sticker .h-turn { right: -13px; bottom: -13px; cursor: nwse-resize; background: var(--leaf); }
+  .sticker .h-del { right: -13px; top: -13px; cursor: pointer; }
+  #tray { left: 50%; top: 842px; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px;
+          padding: 6px 18px; border: 1px solid #000; border-radius: 40px; background: rgba(255,255,255,.72); }
+  #tray .sep { width: 1px; height: 36px; background: rgba(0,0,0,.25); margin: 0 6px; }
+  .thumb { width: 50px; height: 50px; padding: 4px; border: 0; background: none; cursor: grab; touch-action: none;
+           border-radius: 50%; transition: transform 300ms cubic-bezier(.3,1.6,.5,1); }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+  .thumb:hover, .thumb:focus-visible { transform: scale(1.15); }
+  .thumb:focus-visible { outline: 2px dashed var(--leaf); }
+  .thumb[aria-pressed="true"] { background: var(--leaf); transform: scale(1.15); }
+  /* a picked shape follows the pointer in place of the arrow; each click on the board places a copy */
+  #deco-cursor { position: absolute; z-index: 13; pointer-events: none; max-width: none; opacity: 0; transform: translate(-50%, -50%);
+                 transition: opacity 150ms ease; }
+  body.brushing #deco-cursor.on { opacity: .75; }
+  body.brushing #stage, body.brushing .sticker, body.brushing #deco-fills .fill { cursor: none; }
+  /* dialogs and panels always keep the normal cursor, even while a shape is held */
+  body.brushing :is(#name-dialog, #gallery, #lightbox, #tray, #tools, #undo-bar) { cursor: auto; }
+  .sticker.placed { animation: place-in 360ms cubic-bezier(.2,1.5,.5,1); }
+  @keyframes place-in { 0% { opacity: 0; scale: 1.35; } 60% { opacity: 1; scale: .95; } 100% { scale: 1; } }
+  #tools { right: 36px; top: 46px; z-index: 11; display: flex; gap: 10px; }
+  .pill { padding: 7px 18px; border: 1px solid #000; border-radius: 999px; background: rgba(255,255,255,.72); color: #000;
+          font: 300 17px/1 'MuseoModerno', sans-serif; cursor: pointer; transition: background 200ms; }
+  .pill:hover { background: #fff; }
+  .pill.go { background: var(--leaf); }
+  .pill.go:hover { background: #8fbd78; }
+  .pill:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 3px; }
+  .pill[disabled] { opacity: .5; cursor: progress; }
+  /* undo: says what the last change was, with a way back */
+  #undo-bar { left: 756px; top: 788px; transform: translate(-50%, 8px); z-index: 11; display: flex; align-items: center; gap: 12px;
+              padding: 6px 8px 6px 18px; border: 1px solid #000; border-radius: 999px; background: rgba(255,255,255,.85);
+              font: 300 16px/1 'MuseoModerno', sans-serif; color: #000; white-space: nowrap;
+              transition: opacity 300ms ease, transform 300ms ease, visibility 0s linear 300ms; }
+  body.decorating #undo-bar:not(.on) { opacity: 0; visibility: hidden; }
+  body.decorating #undo-bar.on { transform: translate(-50%, 0); transition: opacity 300ms ease, transform 300ms ease, visibility 0s; }
+  #undo-bar button { padding: 5px 14px; font-size: 15px; }
+  #flash { position: absolute; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; }
+  #flash.on { animation: flash-shot 700ms ease-out; }
+  @keyframes flash-shot { from { opacity: .9; } to { opacity: 0; } }
+
+  /* ---------- gallery ---------- */
+  #gallery { position: absolute; inset: 0; z-index: 20; background: rgba(244,244,245,.96); opacity: 0; visibility: hidden;
+             transition: opacity 400ms ease, visibility 0s linear 400ms; }
+  body.gallery-open #gallery { opacity: 1; visibility: visible; transition: opacity 400ms ease, visibility 0s; }
+  #gallery h2 { position: absolute; left: 120px; top: 168px; margin: 0; font: 400 34px/1 'MuseoModerno', sans-serif; color: #000; }
+  #gallery .count { position: absolute; left: 120px; top: 212px; margin: 0; font: 300 17px/1 'MuseoModerno', sans-serif; }
+  #gallery .g-tools { position: absolute; right: 120px; top: 170px; display: flex; gap: 10px; }
+  #g-grid { position: absolute; left: 120px; right: 108px; top: 252px; bottom: 60px; overflow-y: auto; padding: 4px 12px 24px 4px;
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; align-content: start; }
+  .g-card { margin: 0; }
+  .g-card figcaption { margin-top: 8px; font: 300 15px/1.3 'MuseoModerno', sans-serif; color: #000;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g-card figcaption .mine { color: #5d8f45; }
+  .g-item { width: 100%; padding: 0; border: 1px solid #000; border-radius: 12px; overflow: hidden; background: #f4f4f5; cursor: zoom-in;
+            aspect-ratio: 1512 / 982; transition: transform 300ms cubic-bezier(.3,1.4,.5,1); }
+  .g-item img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .g-item:hover { transform: scale(1.03); }
+  .g-item.new { animation: g-new 1.4s ease-out; }
+  @keyframes g-new { from { box-shadow: 0 0 0 10px var(--leaf); } to { box-shadow: 0 0 0 0 transparent; } }
+  .g-empty { grid-column: 1 / -1; margin: 80px 0 0; text-align: center; font: 300 20px/1.5 'MuseoModerno', sans-serif; }
+  #lightbox { position: absolute; inset: 0; z-index: 25; display: grid; place-items: center; background: rgba(244,244,245,.97);
+              opacity: 0; visibility: hidden; transition: opacity 300ms, visibility 0s linear 300ms; }
+  #lightbox.on { opacity: 1; visibility: visible; transition: opacity 300ms, visibility 0s; }
+  #lightbox img { width: 1060px; border: 1px solid #000; border-radius: 14px; display: block; }
+  #lightbox .lb-tools { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  #lightbox a.pill { text-decoration: none; }
+  #lb-meta { margin: 14px 0 0; text-align: center; font: 300 18px/1 'MuseoModerno', sans-serif; color: #000; }
+  .pill.danger:hover { background: #f6d7d2; }
+  .pill.danger.arm { background: #e9897a; }
+  /* name before uploading */
+  #name-dialog { position: absolute; inset: 0; z-index: 26; display: grid; place-items: center; background: rgba(244,244,245,.8);
+                 opacity: 0; visibility: hidden; transition: opacity 250ms, visibility 0s linear 250ms; }
+  #name-dialog.on { opacity: 1; visibility: visible; transition: opacity 250ms, visibility 0s; }
+  #name-dialog form { width: 460px; padding: 32px 36px 28px; border: 1px solid #000; border-radius: 22px; background: #fff; text-align: center; }
+  #name-dialog label { display: block; margin-bottom: 16px; font: 400 26px/1.2 'MuseoModerno', sans-serif; color: #000; }
+  #name-dialog input { width: 100%; box-sizing: border-box; padding: 10px 18px; border: 1px solid #000; border-radius: 999px; background: #f4f4f5;
+                       font: 300 20px/1.2 'MuseoModerno', sans-serif; color: #000; text-align: center; outline: none; }
+  #name-dialog input:focus { box-shadow: 0 0 0 3px var(--leaf); }
+  #name-dialog .hint { margin: 10px 0 20px; font: 300 14px/1.3 'MuseoModerno', sans-serif; color: #555; }
+  #name-dialog .row { display: flex; gap: 10px; justify-content: center; }
+
+  /* ear button: sound waves ripple out while the ambience plays */
+  #ear { padding: 0; border: 0; background: none; cursor: pointer; transition: transform 300ms cubic-bezier(.3,1.6,.5,1); }
+  #ear:hover { transform: scale(1.12); }
+  #ear:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 6px; border-radius: 8px; }
+  #ear::before, #ear::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+                              border-radius: 50%; border: 1.5px solid var(--leaf); opacity: 0; pointer-events: none; }
+  #ear[aria-pressed="true"]::before { animation: ear-wave 2.4s ease-out infinite; }
+  #ear[aria-pressed="true"]::after  { animation: ear-wave 2.4s ease-out 1.2s infinite; }
+  @keyframes ear-wave { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.9); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tring, .spin { animation: none !important; }
+    #ring-label { transition: opacity 200ms ease; }
+  }
+</style>
+</head>
+<body class="none-on" data-top="home">
+<div id="stage">
+
+  <!-- title: clicking it closes every open view (back to the start screen) -->
+  <button id="wordmark" aria-label="Circle Dance — back to start">CIRCLE<br>DANCE</button>
+
+  <!-- the ring of six circles is the menu: each one opens one of the six views; the bigger centre circle
+       opens "decorate your own Circle Dance" (the title goes home) -->
+  <nav id="ring" aria-label="Views">
+    <svg viewBox="0 0 94.88 94.88" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle data-c="1" cx="8.64" cy="47.44" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="2" cx="28.04" cy="13.84" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="3" cx="66.84" cy="13.84" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="4" cx="86.24" cy="47.44" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="5" cx="66.84" cy="81.04" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="6" cx="28.04" cy="81.04" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="0" cx="47.44" cy="47.44" r="14" stroke="#010101" stroke-miterlimit="10"/>
+    </svg>
+    <button class="dot big" data-go="decorate" data-c="0" style="left:47.44px;top:47.44px" aria-label="Decorate your own Circle Dance" aria-pressed="false"></button>
+    <button class="dot" data-go="history" data-c="1" style="left:8.64px;top:47.44px" aria-label="History" aria-pressed="false"></button>
+    <button class="dot" data-go="emotion" data-c="2" style="left:28.04px;top:13.84px" aria-label="Emotion" aria-pressed="false"></button>
+    <button class="dot" data-go="duration" data-c="3" style="left:66.84px;top:13.84px" aria-label="Duration" aria-pressed="false"></button>
+    <button class="dot" data-go="movement" data-c="4" style="left:86.24px;top:47.44px" aria-label="Movement" aria-pressed="false"></button>
+    <button class="dot" data-go="group" data-c="5" style="left:66.84px;top:81.04px" aria-label="Group size" aria-pressed="false"></button>
+    <button class="dot" data-go="touch" data-c="6" style="left:28.04px;top:81.04px" aria-label="Physical touch" aria-pressed="false"></button>
+  </nav>
+  <p id="ring-label" aria-hidden="true"></p>
+
+  <p id="caption" aria-live="polite">Circle Dance Brings People Together</p>
+
+  <!-- day / night: the data views switch between what was recorded by day and by night -->
+  <button id="daynight" aria-label="Show the night data" aria-pressed="false">
+    <svg viewBox="0 0 34 34" fill="none" stroke="#010101" stroke-width="1.2" stroke-linecap="round" aria-hidden="true">
+      <path class="moon" d="M22.5 5.2a12 12 0 1 0 6.3 15.6A10 10 0 0 1 22.5 5.2z"/>
+      <g class="sun"><circle cx="17" cy="17" r="6.5"/>
+        <path d="M17 3.5v3.5M17 27v3.5M3.5 17H7M27 17h3.5M7.5 7.5l2.4 2.4M24.1 24.1l2.4 2.4M7.5 26.5l2.4-2.4M24.1 9.9l2.4-2.4"/></g>
+    </svg>
+  </button>
+  <p id="daynight-label" aria-hidden="true">night</p>
+
+  <!-- the views that are on right now; click one to turn it off -->
+  <div id="showing" aria-label="Views that are on" aria-live="polite"></div>
+
+  <!-- ear: plays the night-time ambience (crickets + people talking) -->
+  <button id="ear" class="absolute h-[47px] left-[1448.4px] top-[904px] w-[29px]" aria-label="Play ambient sound" aria-pressed="false" title="Listen">
+    <div class="absolute inset-[-4.26%_-6.9%]"><img alt="" class="block max-w-none size-full" src="assets/v2/ear.svg"></div>
+  </button>
+
+  <!-- grass -->
+  <img id="grass" alt="" class="absolute h-[1032.19px] left-[-12px] top-[-13px] w-[1552.2px] max-w-none pointer-events-none" src="assets/v2/grass.svg">
+
+  <!-- ===== under-sculpture data ===== -->
+
+
+  <!-- 2 · emotion: mood icons (Figma 84:3) scattered across the screen, one sheet per mood -->
+  <div class="layer passive" data-for="emotion">
+    <div class="emo-day">
+      <div class="emo-sheet" data-emo="calm"><div class="emo-icon" style="left:1090px;top:190px;width:115px;height:106px;transform:translate(-50%,-50%) rotate(-4deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:713px;top:799px;width:146px;height:136px;transform:translate(-50%,-50%) rotate(-19deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:88px;top:368px;width:103px;height:95px;transform:translate(-50%,-50%) rotate(10deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:1055px;top:646px;width:132px;height:122px;transform:translate(-50%,-50%) rotate(2deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:750px;top:477px;width:161px;height:150px;transform:translate(-50%,-50%) rotate(-13deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:265px;top:462px;width:107px;height:99px;transform:translate(-50%,-50%) rotate(-8deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div><div class="emo-icon" style="left:1235px;top:436px;width:126px;height:117px;transform:translate(-50%,-50%) rotate(-16deg)"><img alt="" src="assets/v2/emo-icons/calm.svg"></div></div>
+      <div class="emo-sheet" data-emo="excited"><div class="emo-icon" style="left:481px;top:745px;width:156px;height:146px;transform:translate(-50%,-50%) rotate(-0deg)"><img alt="" src="assets/v2/emo-icons/excited.svg"></div><div class="emo-icon" style="left:224px;top:274px;width:135px;height:126px;transform:translate(-50%,-50%) rotate(15deg)"><img alt="" src="assets/v2/emo-icons/excited.svg"></div><div class="emo-icon" style="left:988px;top:378px;width:100px;height:93px;transform:translate(-50%,-50%) rotate(19deg)"><img alt="" src="assets/v2/emo-icons/excited.svg"></div><div class="emo-icon" style="left:994px;top:276px;width:120px;height:112px;transform:translate(-50%,-50%) rotate(-2deg)"><img alt="" src="assets/v2/emo-icons/excited.svg"></div><div class="emo-icon" style="left:338px;top:332px;width:146px;height:136px;transform:translate(-50%,-50%) rotate(16deg)"><img alt="" src="assets/v2/emo-icons/excited.svg"></div></div>
+      <div class="emo-sheet" data-emo="energetic"><div class="emo-icon" style="left:123px;top:569px;width:106px;height:90px;transform:translate(-50%,-50%) rotate(-11deg)"><img alt="" src="assets/v2/emo-icons/energetic.svg"></div><div class="emo-icon" style="left:534px;top:291px;width:128px;height:108px;transform:translate(-50%,-50%) rotate(-18deg)"><img alt="" src="assets/v2/emo-icons/energetic.svg"></div><div class="emo-icon" style="left:580px;top:406px;width:115px;height:98px;transform:translate(-50%,-50%) rotate(-4deg)"><img alt="" src="assets/v2/emo-icons/energetic.svg"></div><div class="emo-icon" style="left:1433px;top:550px;width:106px;height:90px;transform:translate(-50%,-50%) rotate(17deg)"><img alt="" src="assets/v2/emo-icons/energetic.svg"></div></div>
+      <div class="emo-sheet" data-emo="curiosity"><div class="emo-icon" style="left:570px;top:558px;width:87px;height:166px;transform:translate(-50%,-50%) rotate(9deg)"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></div><div class="emo-icon" style="left:292px;top:619px;width:92px;height:177px;transform:translate(-50%,-50%) rotate(11deg)"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></div><div class="emo-icon" style="left:923px;top:564px;width:113px;height:217px;transform:translate(-50%,-50%) rotate(-6deg)"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></div><div class="emo-icon" style="left:233px;top:758px;width:74px;height:142px;transform:translate(-50%,-50%) rotate(3deg)"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></div></div>
+    </div>
+    <div class="emo-night">
+      <div class="emo-sheet" data-emo="tired"><div class="emo-icon" style="left:321px;top:246px;width:168px;height:103px;transform:translate(-50%,-50%) rotate(-4deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div><div class="emo-icon" style="left:739px;top:692px;width:215px;height:131px;transform:translate(-50%,-50%) rotate(12deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div><div class="emo-icon" style="left:212px;top:665px;width:166px;height:101px;transform:translate(-50%,-50%) rotate(14deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div><div class="emo-icon" style="left:809px;top:358px;width:194px;height:119px;transform:translate(-50%,-50%) rotate(14deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div><div class="emo-icon" style="left:789px;top:530px;width:207px;height:126px;transform:translate(-50%,-50%) rotate(8deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div><div class="emo-icon" style="left:1262px;top:436px;width:175px;height:107px;transform:translate(-50%,-50%) rotate(9deg)"><img alt="" src="assets/v2/emo-icons/tired.svg"></div></div>
+      <div class="emo-sheet" data-emo="angry"><div class="emo-icon" style="left:448px;top:250px;width:113px;height:128px;transform:translate(-50%,-50%) rotate(-4deg)"><img alt="" src="assets/v2/emo-icons/angry.svg"></div><div class="emo-icon" style="left:823px;top:823px;width:108px;height:123px;transform:translate(-50%,-50%) rotate(-6deg)"><img alt="" src="assets/v2/emo-icons/angry.svg"></div></div>
+      <div class="emo-sheet" data-emo="energetic"><div class="emo-icon" style="left:931px;top:675px;width:97px;height:82px;transform:translate(-50%,-50%) rotate(12deg)"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></div><div class="emo-icon" style="left:916px;top:803px;width:92px;height:78px;transform:translate(-50%,-50%) rotate(-12deg)"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></div><div class="emo-icon" style="left:127px;top:285px;width:113px;height:96px;transform:translate(-50%,-50%) rotate(-18deg)"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></div><div class="emo-icon" style="left:976px;top:574px;width:97px;height:82px;transform:translate(-50%,-50%) rotate(5deg)"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></div></div>
+      <div class="emo-sheet" data-emo="curiosity"><div class="emo-icon" style="left:468px;top:686px;width:84px;height:161px;transform:translate(-50%,-50%) rotate(11deg)"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></div><div class="emo-icon" style="left:1054px;top:298px;width:80px;height:154px;transform:translate(-50%,-50%) rotate(-19deg)"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></div><div class="emo-icon" style="left:356px;top:530px;width:85px;height:163px;transform:translate(-50%,-50%) rotate(-15deg)"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></div><div class="emo-icon" style="left:591px;top:489px;width:111px;height:212px;transform:translate(-50%,-50%) rotate(5deg)"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></div></div>
+    </div>
+  </div>
+
+  <!-- decorate: emotion colours dropped into the gaps of the outline fill them, under the line -->
+  <svg id="deco-fills" class="deco-ui" viewBox="0 0 1512 982" aria-hidden="true">
+    <defs><filter id="fill-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>
+    <g filter="url(#fill-soft)"><path id="fill-preview"/><g id="fill-list"></g></g>
+  </svg>
+
+  <!-- the dancers (line drawing of the sculpture), exactly as exported from Figma node 5:2 -->
+  <div id="dancers" class="absolute h-[585px] left-[222px] top-[247px] w-[1132px] pointer-events-none">
+<svg id="dancers-svg" class="absolute block inset-0 size-full" role="img" aria-label="Line drawing of eleven figures holding hands in a circle" preserveAspectRatio="none" overflow="visible" width="1132" height="585" viewBox="0 0 1132 585" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Layer_1" clip-path="url(#clip0_0_17)">
+<path id="Vector" d="M1118.97 290.358C1101.25 303.082 1098.78 283.606 1083.02 274.393C1057.09 259.998 1061.34 276.582 1046.02 285.073C1036.33 289.187 1012.24 281.935 1005.25 271.916C994.033 257.496 1008.77 237.213 991.728 225.057C984.73 219.985 974.301 217.457 973.081 207.43C972.336 200.695 974.657 193.934 972.759 187.165C970.565 179.369 968.684 173.728 963.101 169.639C956.12 165.661 946.31 165.712 940.905 172.456C934.745 180.149 939.541 168.214 941.659 164.091C947.157 151.927 958.298 143.495 964.499 132.23C967.27 127.573 968.015 121.584 969.82 116.622C973.793 108.665 985.256 108.122 993.109 106.909C998.37 105.518 997.227 101.768 994.101 97.9934C990.593 93.7266 986.543 89.6718 980.545 90.1468C970.777 89.6633 964.991 93.4297 965.219 103.372C964.855 121.236 946.564 141.714 927.908 134.58C922.868 132.043 930.17 121.194 927.985 111.965C927.036 96.1357 909.262 86.8725 895.96 95.8642C874.848 111.973 898.773 123.213 891.606 137.006C886.37 144.785 874.628 146.659 865.656 145.514C852.533 143.097 836.199 133.613 843.374 121.627C847.695 116.248 855.201 113.585 860.319 109.089C870.993 101.217 863.496 86.9743 852.914 83.0213C840.138 77.6432 823.897 87.3051 818.263 99.461C815.137 105.764 816.408 113.39 812.409 119.268C804.268 129.897 769.676 134.232 762.416 128.362C760.298 126.776 760.12 122.857 762.899 121.923C765.762 120.575 770.693 117.767 774.556 112.618C788.196 94.982 777.403 73.5629 753.893 77.6941C731.137 81.7913 726.943 109.038 737.957 123.662C739.287 125.384 736.864 126.351 735.331 126.869C725.698 129.694 722.656 116.444 713.244 113.169C704.255 109.445 696.486 117.563 687.023 116.215C675.916 115.756 666.021 109.886 657.854 103.024C650.271 96.3478 649.543 90.7321 643.561 85.4728C626.609 69.6863 603.209 84.7348 590.298 72.3075C584.986 65.9878 582.605 56.4616 590.06 51.2616C600.227 42.3801 604.853 27.883 599.388 15.2266C592.162 -4.42803 566.669 -3.22347 561.095 18.4162C558.519 26.6021 561.323 35.1273 561.289 43.3047C558.545 54.0185 541.855 44.8995 534.06 42.9994C521.42 39.6656 500.011 35.3903 490.802 40.1746C480.322 43.3472 476.755 55.5454 466.123 58.7095C455.27 62.2214 446.027 57.3608 434.794 59.227C421.874 60.3891 410.462 68.3036 398.72 70.6533C388.384 73.1727 379.081 78.3472 369.389 82.4784C352.361 88.0685 350.319 53.5774 325.521 71.6458C310.907 84.0138 322.065 102.973 311.61 111.99C299.605 120.04 283.424 117.3 269.834 120.541C262.642 121.796 255.076 124.825 249.137 129.015C243.69 132.892 238.53 136.684 231.803 138.092C225.67 139.381 218.807 138.261 212.445 138.753C200.762 138.227 180.87 145.277 166.365 144.556C158.046 144.055 141.059 144.352 147.922 136.378C151.556 132.807 158.164 130.228 161.765 126.53C171.644 117.445 180.488 94.3458 173.135 79.4415C164.027 57.3947 139.662 67.9388 133.011 85.5407C126.886 97.6202 132.901 108.868 127.758 120.575C123.455 128.404 116.16 135.038 112.576 143.529C108.129 154.743 98.8602 153.692 89.0496 155.685C72.9019 160.317 73.2492 177.876 71.4108 192.068C68.3863 201.323 58.7112 193.62 52.73 190.354C36.9805 189.998 32.0751 193.926 20.1635 176.875C10.446 168.061 1.85538 193.077 1.29622 199.261C2.45689 210.679 12.2675 205.81 15.7241 198.549C21.1123 190.575 24.9078 193.544 31.9226 200.356C38.1072 206.039 44.4189 210.543 51.9336 214.42C73.8338 223.827 46.1896 231.903 41.208 247.707C36.1841 259.32 35.5063 273.359 39.3272 285.319C41.1487 293.039 48.4262 300.809 49.8071 308.316C49.7309 314.924 39.539 313.262 36.2688 317.639C23.798 328.531 37.4464 363.751 17.3762 363.208C-9.27688 351.485 7.26901 397.038 21.07 398.87C32.9223 399.099 36.7178 384.237 38.48 375.237C41.2419 368.298 49.1209 385.425 50.4595 387.987C53.1197 393.95 52.8232 400.423 55.1699 406.31C62.0662 422.3 69.9875 430.291 59.0755 447.027C51.2389 460.676 74.4099 479.652 87.5839 477.251C99.4871 473.773 95.2257 463.28 86.364 459.573C73.2747 454.178 76.1467 446.645 77.7055 435.228C77.9682 388.945 76.5025 410.492 106.443 401.873C110.789 400.44 115.55 397.784 119.193 394.9C122.268 392.61 125.107 389.403 129.046 388.911C148.244 390.871 155.699 428.306 150.116 444.024C148.633 449.368 144.787 453.194 141.983 457.8C135.544 468.641 136.239 482.68 138.831 493.284C140.865 500.774 145.592 510.479 144.719 518.147C144.508 521.345 143.982 524.17 142.457 526.935C141.017 530.227 135.459 534.536 136.595 538.489C139.28 544.495 150.065 547.252 155.301 543.434C157.766 540.788 154.555 536.818 152.437 530.252C150.701 525.281 149.904 519.36 151.277 514.381C152.615 508.706 160.13 497.67 162.036 489.925C163.307 486.336 165.205 475.02 165.925 469.142C167.475 453.669 172.711 434.473 171.669 418.695C170.873 411.688 168.975 404.639 167.814 397.555C163.366 364.405 156.58 360.401 190.646 346.311C194.442 344.224 198.059 341.45 200.881 337.565C212.233 323.085 201.499 305.61 209.166 304.932C214.385 304.423 220.764 308.486 226.424 308.859C231.202 309.597 236.37 308.834 241.334 307.595C285.872 297.06 296.115 350.832 342.474 356.49C360.773 360.986 373.159 371.14 371.541 391.227C371.296 399.294 370.991 407.412 372.575 415.369C374.464 428.06 381.284 439.384 382.411 452.202C383.665 467.267 379.759 482.384 379.801 497.424C379.225 503.557 380.827 521.863 385.088 533.908C386.994 540.677 392.035 547.684 391.044 554.343C390.112 562.512 381.098 568.781 384.571 576.992C388.274 586.323 402.913 586.222 404.54 575.219C405.218 568.102 398.728 563.496 397.356 556.676C389.172 530.829 422.246 509.961 408.251 484.335C404.98 476.997 399.524 442.675 413.749 445.178C426.067 449.58 433.48 462.873 442.435 473.12C447.171 479.007 452.881 486.065 456.245 493.157C458.744 499.273 458.769 503.777 462.692 508.875C468.512 518.122 481.805 519.861 480.526 530.735C480.195 535.096 477.696 538.514 477.942 542.603C478.119 547.939 483.279 553.554 488.65 552.85C494.106 552.07 497.707 545.326 496.961 540.389C496.224 535.384 490.624 534.035 487.744 530.439C479.407 520.751 491.005 505.966 477.916 496.397C448.527 467.199 468.012 468.412 458.405 445.89C455.084 439.477 450.509 433.209 447.849 426.473C445.689 420.086 441.774 414.063 436.073 410.729C429.431 406.267 397.228 395.536 413.952 386.63C439.089 376.985 459.684 373.362 491.404 365.584C501.079 362.725 507.966 354.76 518.709 352.741C528.901 349.534 538.356 353.004 548.463 350.17C563.585 346.506 567.728 335.877 583.139 330.643C595.313 326.97 612.816 323.416 623.406 334.112C627.837 339.83 626.914 347.965 627.21 355.158C626.465 368.892 621.737 382.083 624.432 395.952C631.201 435.592 680.66 419.017 688.116 478.329C689.37 492.393 681.999 498.297 689.336 514.771C695.275 530.49 706.737 540.669 704.433 549.593C703.196 552.698 698.392 554.632 697.003 558.05C692.42 569.46 707.644 576 716.65 572.717C732.035 568.119 711.617 557.134 709.787 542.501C706.814 530.235 712.465 521.633 712.032 508.528C711.871 496.77 705.399 487.312 703.052 475.86C701.553 469.049 701.985 464.714 700.756 458.75C697.613 445.695 693.487 434.49 692.454 421.647C690.844 407.345 699.053 395.698 697.02 382.193C694.809 370.919 690.658 364.108 677.297 353.623C672.214 350.136 667.385 346.582 664.377 341.17C657.32 329.286 676.975 332.009 684.287 331.398C693.894 331.05 702.823 332.501 712.083 330.889C743.515 323.288 767.16 311.565 800.641 322.805C807.639 324.417 813.883 326.003 820.475 324.595C836.461 319.827 835.86 328.989 834.487 341.883C834.53 352.206 834.894 363.505 839.698 372.803C855.811 391.278 850.118 405.427 837.656 423.886C817.204 455.603 835.843 487.982 818.67 492.376C813.282 494.242 806.513 491.833 803.912 493.708C801.412 499.79 815.451 508.044 821.423 504.337C825.422 502.148 824.456 496.787 826.397 493.106C829.794 483.766 835.868 476.386 841.816 468.803C848.356 462.746 843.146 453.881 843.171 446.23C841.392 432.691 852.668 432.292 859.903 424.641C865.868 417.151 866.689 404.757 871.095 396.809C874.704 396.52 876.043 405.97 877.525 408.863C880.397 419.025 883.464 428.458 890.987 435.991C908.33 449.038 891.487 458.589 894.8 466.504C902.501 472.891 915.285 462.076 913.506 452.855C913.065 449.326 910.685 447.316 907.881 445.551C895.156 438.901 903.983 424.361 900.73 411.187C896.977 392.092 877.305 387.096 890.039 365.414C904.526 322.406 875.45 324.926 873.272 307.078C876.178 292.004 887.988 280.951 894.91 267.989C897.062 263.552 899.154 258.378 900.34 253.695C901.137 250.862 901.738 247.469 904.458 245.849C907.584 243.855 911.718 245.111 914.777 242.685C920.089 239.784 917.369 225.023 924.359 233.43C935.999 246.79 940.278 288.356 932.314 292.004C928.688 288.195 926.553 282.944 923.545 291.614C919.784 302.531 918.581 324.552 918.344 330.847C919.411 336.148 921.038 341.789 922.02 347.736C925.646 365.881 932.602 378.698 927.392 390.353C925.248 395.078 920.97 399.71 922.808 405.334C924.452 410.967 931.077 415.59 935.584 415.717C942.413 415.505 941.303 404.46 940.04 399.846C938.583 394.917 936.059 390.608 936.092 385.476C935.965 377.977 939.329 370.589 942.828 364.108C960.128 334.893 923.088 320.413 938.066 317.63C952.859 319.072 965.643 309.08 965.448 293.997C965.702 283.538 959.611 275.233 962.601 272.307C963.881 271.136 966.024 271.475 967.634 271.916C973.115 273.766 979.613 277.099 984.459 280.518C986.916 282.274 990.203 284.539 992.525 286.719C1000.79 294.023 1001.03 301.148 1007.92 306.433C1024.6 318.207 1049.2 307.273 1056.63 289.442C1061.23 278.304 1065.48 291.893 1071.29 293.955C1075.91 296.169 1081.07 296.211 1086.12 297.026C1101.86 297.585 1108.33 299.91 1114.08 315.688C1115.03 317.376 1115.94 318.894 1117.79 319.463C1124.77 321.583 1134.96 305.78 1129 297.484C1126.73 293.938 1122.85 289.493 1119.16 290.341L1119.05 290.384L1118.97 290.358ZM125.395 239.376C127.987 243.143 128.165 249.225 127.97 253.975C128.097 263.892 122.184 265.402 112.873 262.076C105.892 259.913 103.935 253.661 105.163 246.969C105.79 242.456 106.883 237.714 110.535 235.763C115.254 233.277 122.319 235.152 125.31 239.249L125.395 239.376ZM113.898 197.514C118.134 198.082 121.057 203.401 123.37 206.752C124.276 208.16 125.183 209.542 125.852 211.078C128.656 217.143 121.896 215.183 118.676 214.055C114.872 212.69 110.052 211.01 107.781 208.092C104.35 203.91 108.696 197.073 113.746 197.497L113.898 197.514ZM53.3569 359.747C51.4676 354.904 56.5254 349.636 58.6265 345.496C63.176 337.981 67.3358 330.1 70.8686 322.194C72.402 318.911 73.5966 315.264 76.1975 312.642C80.0354 309.037 82.4329 313.024 81.8568 317.308C81.4332 321.125 79.7304 324.535 78.2054 327.979C75.2232 334.418 72.5461 341.119 70.14 347.795C68.5303 352.062 66.9291 356.728 63.2777 359.697C60.7615 361.894 55.4071 363.234 53.4247 359.875L53.3569 359.747ZM87.5585 385.17C83.5936 383.041 79.2644 377.807 80.2556 372.692C81.1198 368.451 85.5168 366.144 88.914 363.412C91.7183 361.317 94.8191 358.39 96.7676 355.778C106.638 341.789 105.316 319.369 101.004 302.378C99.377 296.822 96.6236 291.664 95.7595 285.922C94.836 277.914 103.232 279.839 108.442 281.612C111.95 282.707 115.211 283.809 118.761 284.98C124.598 286.914 126.937 287.652 130.393 287.796C133.087 287.898 136.62 287.516 139.721 287.177C142.364 286.973 145.287 286.549 146.592 289.103C148.43 293.005 146.812 296.109 143.61 298.756C137.611 304.465 135.019 308.944 133.13 314.025C129.648 323.475 130.325 337.904 130.961 344.428C131.325 348.465 131.639 352.486 130.978 356.702C129.851 364.54 125.488 370.928 119.829 376.043C111.551 383.465 98.2926 390.566 87.6771 385.23L87.55 385.162L87.5585 385.17ZM206.125 280.238C202.126 278.703 200.83 276.616 204.989 274.555C217.596 269.321 217.731 262.085 216.884 249.734C216.35 243.279 218.231 237.01 218.477 230.597C218.748 225.303 216.783 220.4 212.699 216.804C198.949 204.241 177.557 219.187 173.838 236.178C172.609 241.65 172.626 247.393 173.99 252.83C174.888 257.394 178.43 262.755 176.871 267.488C175.388 271.883 169.076 273.664 164.519 274.156C155.513 275.106 149.743 266.615 154.42 258.87C156.301 255.502 159.325 252.559 161.13 249.149C162.951 245.603 163.739 241.277 164.146 237.315C165.959 217.754 155.987 215.141 152.785 198.608C151.717 190.838 151.2 178.623 158.63 173.355C160.528 172.176 162.019 172.193 164.696 172.006C167.069 171.862 169.602 171.701 171.906 171.302C176.312 170.666 180.048 168.732 184.428 167.824C194.704 165.907 205.947 166.543 215.351 162.183C229.16 155.414 234.43 141.358 252.602 142.333C264.057 142.571 274.452 146.184 285.889 143.656C286.812 143.47 287.727 143.258 288.634 143.029C295.928 141.502 304.57 135.912 305.773 138.855C306.798 142.172 293.539 150.035 288.583 164.668C287.787 167.179 286.931 169.936 286.889 172.345C286.236 184.696 286.041 197.997 285.093 210.263C284.474 219.773 285.83 229.206 287.007 238.554C287.634 243.033 286.499 247.427 284.135 251.261C281.229 256.215 277.12 260.583 274.952 265.97C272.952 271.026 272.681 276.243 272.274 281.774C271.952 288.534 270.86 298.663 262.066 298.383C254.229 298.408 241.911 290.282 231.151 286.524C224.009 283.631 214.52 281.544 209.081 280.942C208.116 280.806 207.26 280.645 206.26 280.297L206.108 280.247L206.125 280.238ZM620.967 308.681C619.662 309.436 617.645 310.505 615.061 311.463C608.36 313.957 603.751 312.634 599.176 313.949C590.586 316.417 582.681 321.261 573.947 323.551C569.279 324.79 564.509 325.392 559.493 326.139C535.56 329.684 531.807 330.906 526.944 333.849C523.818 335.75 519.166 339.228 514.761 345.785C513.151 346.955 510.601 348.601 507.221 349.941C493.513 355.387 485.973 347.956 469.309 350.756C460.82 352.181 452.644 355.633 449.67 357.169C439.029 362.632 433.065 366.05 418.561 362.284C416.231 361.665 412.029 360.791 415.511 358.102C417.053 356.66 418.671 354.861 419.917 353.139C427.524 342.493 428.982 327.343 423.492 314.492C410.513 284.887 380.767 303.243 381.987 328.582C382.25 336.386 385.393 343.749 386.664 351.409C388.096 361.011 378.437 360.35 373.846 355.006C371.634 352.741 370.237 349.89 368.483 347.32C365.907 343.452 361.095 339.584 355.673 335.928C347.006 329.371 335.357 324.892 325.767 323.28C320.963 322.304 316.456 322.007 311.458 322.33C291.997 322.822 277.9 314.39 285.584 297.153C295.691 280.535 293.327 289.578 293.133 269.456C291.718 237.875 305.739 253.305 313.008 220.977C316.812 210.501 320.226 198.947 329.071 191.652C338.263 184.281 351.878 183.059 362.383 186.35C367.221 187.767 370.728 190.651 375.26 192.729C384.122 196.75 395.263 195.478 400.372 205.606C404.506 215.048 416.443 218.492 425.025 223.132C431.583 226.033 438.631 231.089 445.655 231.615C460.404 232.285 461.879 206.064 449.12 202.943C438.123 200.415 422.238 207.201 412.36 195.02C407.454 188.946 404.735 181.922 398.177 176.773C379.996 157.848 328.224 168.952 345.058 152.775C354.089 145.438 371.499 138.813 369.381 124.451C368.347 117.894 363.061 113.246 363.383 108.682C363.789 104.551 366.187 103.711 370.762 102.354C383.69 98.4939 397.084 94.4815 408.327 85.9224C415.35 79.5348 421.967 71.6797 432.04 70.4922C441.986 69.593 452.61 70.7127 462.455 67.3365C469.317 65.64 475.637 61.7633 481.771 58.947C493.496 54.6378 504.73 57.3014 518.489 58.3363C548.022 59.0913 528.757 69.4318 520.98 83.8356C516.769 90.7915 513.27 98.443 511.313 105.849C509.796 111.32 509.915 117.377 507.204 122.492C498.486 135.241 494.14 133.29 492.09 151.732C490.785 164.371 486.964 176.688 480.72 187.971C478.23 192.577 475.925 197.327 474.4 202.34C471.189 211.824 472.782 222.122 470.41 231.75C467.292 244.627 454.931 254.959 455.626 268.803C456.168 274.606 459.718 280.026 465.411 281.765C471.435 283.742 478.746 281.103 481.635 275.522C486.329 265.512 478.348 255.078 479.644 244.678C480.254 230.3 491.683 219.696 496.707 206.726C499.859 199.541 500.587 191.644 503.01 184.238C505.577 176.493 510.822 169.605 515.574 162.87C518.412 158.908 520.632 154.268 524.301 150.994C534.425 142.325 536.094 165.313 538.279 171.056C539.144 174.39 540.457 177.223 542.092 180.217C545.921 187.368 551.589 193.552 555.173 200.924C558.062 206.599 558.926 213.097 561.578 218.865C564.026 224.353 569.609 226.423 575.472 227.416C581.19 228.374 587.798 229.952 592.992 226.61C598.592 222.886 596.516 214.768 590.137 213.275C584.215 211.281 576.607 211.12 572.591 205.572C567.601 198.998 568.821 189.727 569.185 181.541C569.363 174.33 569.524 166.814 568.863 159.799C568.508 157.899 568.143 155.32 567.677 153.233C564.958 135.912 545.294 115.79 558.163 110.836C563.128 110.183 569.567 110.726 574.362 107.732C584.765 102.88 584.444 89.0186 591.958 86.0411C599.913 83.1994 606.479 101.929 622.085 102.421C641.138 100.844 641.223 102.557 658.074 113.788C671.9 121.211 682.05 127.234 705.433 130.041C709.338 130.517 715.574 130.126 718.115 132.442C721.852 137.735 711.143 146.379 703.637 153.233C700.875 155.49 698.494 158.561 697.342 161.877C690.056 180.641 704.535 183.517 690.513 202.544C680.474 215.234 671.722 225.244 665.301 232.327C659.574 238.638 656.642 241.853 653.389 244.619C638.283 257.47 628.668 256.325 621.966 263.493C616.29 269.567 612.545 281.773 620.992 308.689L620.967 308.681ZM714.472 307.383C702.146 306.357 689.319 308.494 682.728 311.658C678.144 313.593 673.129 316.74 669.096 319.217C665.292 321.422 658.794 326.028 659.226 318.504C659.362 311.692 666.156 308.096 665.953 301.267C666.114 295.142 665.394 288.814 662.742 283.233C660.531 277.99 656.303 274.215 652.44 270.228C648.009 265.614 649.771 260.991 654.067 257.089C659.904 251.66 665.546 246.29 670.299 239.809C673.883 234.991 675.493 233.04 680.347 231.318C685.007 229.596 689.488 231.649 695.758 231.157C706 230.41 722.106 227.238 720.454 213.402C720.242 209.254 717.827 204.69 718.259 200.975C718.615 199.21 720.149 198.583 722.19 198.735C727.545 199.1 736.822 204.521 740.346 212.393C741.354 214.624 741.879 217.185 741.829 219.637C741.591 227.424 735.102 234.635 744.692 239.877C749.309 241.93 755.647 243.397 758.535 248.843C760.272 251.906 759.857 253.941 760.001 258.565C760.221 269.253 762.865 279.746 767.719 289.247C769.888 293.895 776.428 302.624 772.752 307.307C769.863 310.165 764.373 309.139 760.891 308.664C751.089 307.035 733.424 306.526 714.684 307.375H714.455L714.472 307.383ZM813.731 309.122C807.834 308.876 802.107 308.842 796.287 310.361C790.585 311.871 785.239 312.549 782.452 307.078C781.554 304.999 782.833 303.091 783.536 300.537C783.935 299.24 784.265 297.959 784.562 296.61C786.697 287.338 786.002 275.742 781.359 266.301C778.318 259.964 775.064 257.81 774.429 252.007C773.853 247.927 775.564 243.185 772.43 239.868C769.354 236.662 764.39 236.272 761.204 233.082C757.205 229.519 756.79 225.1 755.426 220.129C752.164 206.107 740.354 199.151 734.856 192.611C730.23 185.909 735.746 182.058 741.905 179.64C745.26 178.164 749.132 176.044 751.961 173.16C754.181 170.963 756.087 168.231 757.358 165.364C759.696 160.138 759.366 155.77 760.332 152.029C760.916 149.213 763.246 146.167 765.55 144.81C768.702 143.258 771.862 143.19 775.708 142.74C780.266 142.299 784.943 142.291 790.009 142.121C795.618 142.002 800.828 141.035 806.386 141.298C812.587 141.57 818.509 143.852 824.507 145.217C829.684 146.473 834.97 147.083 839.935 149.136C841.917 149.976 843.917 151.138 845.577 152.495C848.542 154.939 849.525 157.449 851.991 159.68C860.031 166.653 866.088 162.183 876.06 163.616C878.398 164.007 880.753 164.626 882.812 165.517C887.192 167.128 896.706 172.557 894.749 179.055C894.122 181.066 892.478 182.669 891.013 185.341C888.319 190.015 888.056 193.696 889.047 199.388C890.843 213.275 891.945 227.339 885.481 239.707C883.329 244.118 880.558 248.809 879.499 253.67C877.593 263.561 873.425 284.658 869.663 288.568C867.757 289.289 867.333 282.707 867.181 280.9C867.062 279.051 867.028 277.184 867.088 275.31C867.333 267.573 869.401 262.882 869.468 258.056C869.807 249.403 861.378 239.402 851.974 241.836C844.069 243.669 837.181 250.082 833.606 257.292C827.566 269.787 830.827 287.041 838.656 293.217C840.63 294.778 842.959 296.076 844.239 298.536C846.399 302.421 845.026 308.435 840.985 310.182C838.486 311.133 835.75 309.919 831.446 309.054C825.617 307.561 819.526 308.367 813.875 309.088H813.714L813.731 309.122Z" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke="#010101"/>
+</g>
+<defs>
+<clipPath id="clip0_0_17">
+<rect x="-8" y="-8" width="1148" height="601" fill="white"/>
+</clipPath>
+</defs>
+</svg>
+
+  </div>
+
+  <!-- 4 · movement: shoe prints placed exactly as in Figma 26:129, on top of the dancers' line -->
+  <div class="layer passive" data-for="movement" id="mv">
+    <div class="mv-day">
+     <div class="mv-shoe" data-shoe="heels">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:122" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9534,0.3018,-0.3018,0.9534,1152.61,298.65) translate(49.26px,52.365px) scale(0.647) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:732" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.8073,0.5901,-0.5901,0.8073,1235.90,201.45) translate(49.26px,52.365px) scale(0.787) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:738" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.8505,0.5259,-0.5259,0.8505,1388.31,143.90) translate(49.26px,52.365px) scale(0.677) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:695" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9534,0.3018,-0.3018,0.9534,1040.61,466.00) translate(49.26px,52.365px) scale(0.526) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2683" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9534,0.3018,-0.3018,0.9534,675.61,575.00) translate(49.26px,52.365px) scale(0.817) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2689" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9534,0.3018,-0.3018,0.9534,654.61,691.00) translate(49.26px,52.365px) scale(0.745) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2695" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.7552,0.6555,-0.6555,0.7552,601.65,818.00) translate(49.26px,52.365px) scale(0.686) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1099" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.3747,0.9271,-0.9271,0.3747,988.86,512.50) translate(49.26px,52.365px) scale(0.542) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2811" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.3747,0.9271,-0.9271,0.3747,772.10,366.00) translate(49.26px,52.365px) scale(0.722) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1105" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.3747,0.9271,-0.9271,0.3747,883.10,480.00) translate(49.26px,52.365px) scale(0.597) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:683" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.957,-0.2901,0.2901,0.957,1283.00,163.05) translate(44.91px,47.74px) scale(0.753) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:702" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.9893,-0.146,0.146,0.9893,1303.43,281.04) translate(44.91px,47.74px) scale(0.725) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:708" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.9999,-0.0161,0.0161,0.9999,1314.73,423.77) translate(44.91px,47.74px) scale(0.651) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:714" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.9897,-0.1432,0.1432,0.9897,1324.39,571.64) translate(44.91px,47.74px) scale(0.869) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:720" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.8856,-0.4644,0.4644,0.8856,1347.34,741.26) translate(44.91px,47.74px) scale(0.829) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2707" style="left:0;top:0;width:79.17px;height:84.16px;transform-origin:0 0;transform:matrix(0.9652,0.2615,-0.2615,0.9652,1225.46,650.54) translate(39.585px,42.08px) scale(0.902) translate(-39.585px,-42.08px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2713" style="left:0;top:0;width:79.17px;height:84.16px;transform-origin:0 0;transform:matrix(0.9652,0.2615,-0.2615,0.9652,1201.00,510.00) translate(39.585px,42.08px) scale(0.659) translate(-39.585px,-42.08px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2719" style="left:0;top:0;width:66.87px;height:71.09px;transform-origin:0 0;transform:matrix(0.4615,-0.8871,0.8871,0.4615,910.69,279.50) translate(33.435px,35.545px) scale(0.705) translate(-33.435px,-35.545px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2731" style="left:0;top:0;width:66.87px;height:71.09px;transform-origin:0 0;transform:matrix(0.8346,-0.5509,0.5509,0.8346,628.48,209.82) translate(33.435px,35.545px) scale(0.887) translate(-33.435px,-35.545px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2737" style="left:0;top:0;width:66.87px;height:71.09px;transform-origin:0 0;transform:matrix(0.8346,-0.5509,0.5509,0.8346,517.00,158.84) translate(33.435px,35.545px) scale(0.711) translate(-33.435px,-35.545px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2743" style="left:0;top:0;width:66.87px;height:71.09px;transform-origin:0 0;transform:matrix(0.8346,-0.5509,0.5509,0.8346,371.00,90.84) translate(33.435px,35.545px) scale(0.527) translate(-33.435px,-35.545px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2749" style="left:0;top:0;width:66.87px;height:71.09px;transform-origin:0 0;transform:matrix(0.8346,-0.5509,0.5509,0.8346,265.00,39.84) translate(33.435px,35.545px) scale(0.615) translate(-33.435px,-35.545px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2725" style="left:0;top:0;width:79.17px;height:84.16px;transform-origin:0 0;transform:matrix(0.7232,-0.6906,0.6906,0.7232,751.00,249.68) translate(39.585px,42.08px) scale(0.855) translate(-39.585px,-42.08px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:689" style="left:0;top:0;width:89.82px;height:95.48px;transform-origin:0 0;transform:matrix(0.9973,0.0739,-0.0739,0.9973,1245.97,14.14) translate(44.91px,47.74px) scale(0.672) translate(-44.91px,-47.74px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2701" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.7552,0.6555,-0.6555,0.7552,461.65,917.00) translate(49.26px,52.365px) scale(0.518) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+     </div>
+     <div class="mv-shoe" data-shoe="boot">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:65" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.497,0.8678,-0.8678,0.497,822.27,924.83) translate(37.5px,38.5px) scale(0.660) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1277" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6248,0.7808,-0.7808,0.6248,913.13,869.17) translate(37.5px,38.5px) scale(0.634) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1333" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.5039,0.8638,-0.8638,-0.5039,1095.30,903.80) translate(37.5px,38.5px) scale(0.731) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:3033" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6461,0.7633,-0.7633,0.6461,1251.77,815.00) translate(37.5px,38.5px) scale(0.782) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:3089" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6461,0.7633,-0.7633,0.6461,1365.77,673.00) translate(37.5px,38.5px) scale(0.860) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:3145" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6461,0.7633,-0.7633,0.6461,1483.77,540.00) translate(37.5px,38.5px) scale(0.753) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1445" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.2692,0.9631,-0.9631,-0.2692,46.35,191.73) translate(37.5px,38.5px) scale(0.814) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1501" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.6237,0.7816,-0.7816,-0.6237,168.97,237.03) translate(37.5px,38.5px) scale(0.688) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1613" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.9813,-0.1926,0.1926,-0.9813,201.60,385.00) translate(37.5px,38.5px) scale(0.599) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2755" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.9813,-0.1926,0.1926,-0.9813,170.60,515.00) translate(37.5px,38.5px) scale(0.732) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1725" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.959,0.2833,-0.2833,-0.959,142.26,630.11) translate(37.5px,38.5px) scale(0.842) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1781" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.0221,0.9998,-0.9998,-0.0221,174.64,710.70) translate(37.5px,38.5px) scale(0.893) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1837" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.2723,0.9622,-0.9622,-0.2723,315.58,699.74) translate(37.5px,38.5px) scale(0.720) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1893" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.2723,0.9622,-0.9622,-0.2723,410.51,742.97) translate(37.5px,38.5px) scale(0.699) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1949" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.422,0.9066,-0.9066,-0.422,521.99,790.82) translate(37.5px,38.5px) scale(0.655) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2005" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.1102,0.9939,-0.9939,-0.1102,610.13,864.22) translate(37.5px,38.5px) scale(0.645) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2061" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.4109,0.9117,-0.9117,0.4109,703.20,847.00) translate(37.5px,38.5px) scale(0.652) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2117" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.2674,0.9636,-0.9636,0.2674,794.20,780.00) translate(37.5px,38.5px) scale(0.699) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2173" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,798.50,686.00) translate(37.5px,38.5px) scale(0.688) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2229" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,822.50,573.00) translate(37.5px,38.5px) scale(0.607) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2285" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,877.50,449.00) translate(37.5px,38.5px) scale(0.597) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2341" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,877.50,449.00) translate(37.5px,38.5px) scale(0.603) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2397" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,939.50,370.00) translate(37.5px,38.5px) scale(0.515) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2453" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.8584,0.513,-0.513,0.8584,1026.50,302.00) translate(37.5px,38.5px) scale(0.630) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2509" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.9845,0.1754,-0.1754,0.9845,1053.78,240.80) translate(37.5px,38.5px) scale(0.726) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2565" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.9845,0.1754,-0.1754,0.9845,997.51,114.00) translate(37.5px,38.5px) scale(0.722) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2621" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.9845,0.1754,-0.1754,0.9845,1087.51,3.00) translate(37.5px,38.5px) scale(0.688) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1389" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.7924,0.61,-0.61,-0.7924,1142.35,1009.42) translate(37.5px,38.5px) scale(0.790) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+     </div>
+     <div class="mv-shoe" data-shoe="sneaker">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:31" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(1,0,0,1,1137.00,928.00) translate(52px,49px) scale(0.765) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:851" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.9268,-0.3755,0.3755,0.9268,1114.41,813.11) translate(52px,49px) scale(0.793) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:878" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.8247,-0.5655,0.5655,0.8247,1008.00,729.93) translate(52px,49px) scale(0.725) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:905" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.8247,-0.5655,0.5655,0.8247,889.00,644.81) translate(52px,49px) scale(0.637) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2817" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.7042,-0.71,0.71,0.7042,166.19,702.23) translate(42.285px,39.845px) scale(0.817) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2925" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.9997,-0.0247,0.0247,0.9997,115.81,509.29) translate(42.285px,39.845px) scale(0.678) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2952" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.9997,-0.0247,0.0247,0.9997,114.00,340.09) translate(42.285px,39.845px) scale(0.681) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2979" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.7068,0.7074,-0.7074,0.7068,269.55,153.80) translate(42.285px,39.845px) scale(0.644) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:3006" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.7068,0.7074,-0.7074,0.7068,369.37,21.00) translate(42.285px,39.845px) scale(0.516) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2844" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(0.7042,-0.71,0.71,0.7042,309.00,753.05) translate(42.285px,39.845px) scale(0.742) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2871" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(-0.1856,-0.9826,0.9826,-0.1856,477.77,743.03) translate(42.285px,39.845px) scale(0.657) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:2898" style="left:0;top:0;width:84.57px;height:79.69px;transform-origin:0 0;transform:matrix(-0.1856,-0.9826,0.9826,-0.1856,600.70,686.90) translate(42.285px,39.845px) scale(0.774) translate(-42.285px,-39.845px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:932" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.8247,-0.5655,0.5655,0.8247,815.00,551.81) translate(52px,49px) scale(0.632) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:959" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.8247,-0.5655,0.5655,0.8247,706.00,551.81) translate(52px,49px) scale(0.777) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:986" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.9934,-0.1147,0.1147,0.9934,798.32,451.10) translate(52px,49px) scale(0.581) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1013" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.7997,-0.6004,0.6004,0.7997,785.00,409.44) translate(52px,49px) scale(0.677) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1196" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.9994,0.0353,-0.0353,0.9994,747.77,201.60) translate(52px,49px) scale(0.933) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1223" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.9712,0.2383,-0.2383,0.9712,794.87,52.83) translate(52px,49px) scale(0.780) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1250" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.9712,0.2383,-0.2383,0.9712,897.35,-30.00) translate(52px,49px) scale(0.598) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1040" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.7997,-0.6004,0.6004,0.7997,693.00,411.44) translate(52px,49px) scale(0.760) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1067" style="left:0;top:0;width:104px;height:98px;transform-origin:0 0;transform:matrix(0.0759,-0.9971,0.9971,0.0759,630.00,500.70) translate(52px,49px) scale(0.795) translate(-52px,-49px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"><div class="absolute" style="left:57.5px;top:34.76px;width:71.13px;height:72.48px;transform-origin:0 0;transform:rotate(92.8deg)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div></div>
+     </div>
+     <div class="mv-shoe" data-shoe="dress">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:750" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.5063,0.8624,-0.8624,0.5063,451.51,782.00) translate(35.565px,36.24px) scale(0.645) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1126" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.0245,0.9997,-0.9997,0.0245,592.62,779.58) translate(35.565px,36.24px) scale(0.667) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1131" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.6308,0.776,-0.776,0.6308,643.79,683.98) translate(35.565px,36.24px) scale(0.741) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1136" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.9922,0.1245,-0.1245,0.9922,605.78,538.07) translate(35.565px,36.24px) scale(0.708) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1111" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.5063,0.8624,-0.8624,0.5063,341.51,839.00) translate(35.565px,36.24px) scale(0.654) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1116" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.3296,0.9441,-0.9441,0.3296,237.75,910.49) translate(35.565px,36.24px) scale(0.597) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1146" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.8357,0.5492,-0.5492,-0.8357,105.25,874.57) translate(35.565px,36.24px) scale(0.747) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1151" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.8117,-0.5841,0.5841,-0.8117,4.45,655.38) translate(35.565px,36.24px) scale(0.801) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1171" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.309,-0.9511,0.9511,-0.309,101.91,531.28) translate(35.565px,36.24px) scale(0.664) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1176" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.6065,-0.7951,0.7951,-0.6065,263.14,467.51) translate(35.565px,36.24px) scale(0.603) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1181" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.6065,-0.7951,0.7951,-0.6065,404.14,401.51) translate(35.565px,36.24px) scale(0.596) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1186" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.6065,-0.7951,0.7951,-0.6065,445.14,251.51) translate(35.565px,36.24px) scale(0.687) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:846" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(-0.945,-0.327,0.327,-0.945,525.23,83.46) translate(52.5px,53.5px) scale(0.699) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:765" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.8023,0.5969,-0.5969,0.8023,773.87,503.00) translate(52.5px,53.5px) scale(0.716) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:775" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.9998,0.0198,-0.0198,0.9998,732.12,364.00) translate(52.5px,53.5px) scale(0.819) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:780" style="left:0;top:0;width:71.47px;height:72.83px;transform-origin:0 0;transform:matrix(0.7138,-0.7004,0.7004,0.7138,681.54,337.50) translate(35.735px,36.415px) scale(0.824) translate(-35.735px,-36.415px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1094" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.7138,-0.7004,0.7004,0.7138,715.00,387.54) translate(52.5px,53.5px) scale(0.734) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:791" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.9788,-0.205,0.205,0.9788,387.98,208.91) translate(52.5px,53.5px) scale(0.640) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:1121" style="left:0;top:0;width:77px;height:78.47px;transform-origin:0 0;transform:matrix(0.774,-0.6332,0.6332,0.774,537.91,277.04) translate(38.5px,39.235px) scale(0.817) translate(-38.5px,-39.235px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:796" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.6114,0.7913,-0.7913,0.6114,513.59,49.87) translate(52.5px,53.5px) scale(0.621) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"><div class="absolute" style="left:75.66px;top:55.24px;width:71.13px;height:72.48px;transform-origin:0 0;transform:rotate(-179.6deg)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:801" style="left:0;top:0;width:105px;height:107px;transform-origin:0 0;transform:matrix(0.6114,0.7913,-0.7913,0.6114,604.67,-40.00) translate(52.5px,53.5px) scale(0.612) translate(-52.5px,-53.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+     </div>
+    </div>
+    <div class="mv-night">
+     <div class="mv-shoe" data-shoe="heels">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6716" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9035,0.4286,-0.4286,0.9035,2.89,428.00) translate(49.26px,52.365px) scale(0.645) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7089" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.1307,0.9914,-0.9914,0.1307,219.43,433.75) translate(49.26px,52.365px) scale(0.654) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7095" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.149,0.9888,-0.9888,-0.149,411.47,467.77) translate(49.26px,52.365px) scale(0.585) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7101" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.149,0.9888,-0.9888,-0.149,561.24,520.60) translate(49.26px,52.365px) scale(0.766) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7107" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.149,0.9888,-0.9888,-0.149,710.24,514.60) translate(49.26px,52.365px) scale(0.753) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7113" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.5155,0.8569,-0.8569,0.5155,752.74,465.00) translate(49.26px,52.365px) scale(0.706) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"><div class="absolute" style="left:25.26px;top:17.88px;width:75px;height:77px;transform-origin:0 0;transform:rotate(24.1deg)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7182" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.8604,0.5096,-0.5096,-0.8604,1034.14,402.11) translate(49.26px,52.365px) scale(0.551) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7188" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.4737,0.8807,-0.8807,-0.4737,1116.90,470.61) translate(49.26px,52.365px) scale(0.617) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7194" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.4737,0.8807,-0.8807,-0.4737,1188.90,635.61) translate(49.26px,52.365px) scale(0.809) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7200" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.1592,0.9872,-0.9872,-0.1592,1349.08,706.67) translate(49.26px,52.365px) scale(0.826) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7206" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(-0.1592,0.9872,-0.9872,-0.1592,1473.08,682.67) translate(49.26px,52.365px) scale(0.829) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7146" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9111,0.4123,-0.4123,0.9111,724.98,387.19) translate(49.26px,52.365px) scale(0.782) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7152" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9111,0.4123,-0.4123,0.9111,823.18,318.00) translate(49.26px,52.365px) scale(0.719) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7158" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.8037,0.595,-0.595,0.8037,896.31,205.00) translate(49.26px,52.365px) scale(0.726) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7164" style="left:0;top:0;width:99.13px;height:104.73px;transform-origin:0 0;transform:matrix(0.5643,0.8256,-0.8256,0.5643,1018.46,115.00) translate(49.565px,52.365px) scale(0.636) translate(-49.565px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7170" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9111,0.4123,-0.4123,0.9111,1065.18,52.00) translate(49.26px,52.365px) scale(0.712) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7176" style="left:0;top:0;width:98.52px;height:104.73px;transform-origin:0 0;transform:matrix(0.9111,0.4123,-0.4123,0.9111,1240.18,-30.00) translate(49.26px,52.365px) scale(0.670) translate(-49.26px,-52.365px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/heels-pair.svg"></div>
+     </div>
+     <div class="mv-shoe" data-shoe="boot">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7714" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8704,0.4923,-0.4923,-0.8704,844.33,657.92) translate(37.5px,38.5px) scale(0.712) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"><div class="absolute" style="left:-11.16px;top:61.37px;width:71.13px;height:72.48px;transform-origin:0 0;transform:rotate(-88.8deg)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7770" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8704,0.4923,-0.4923,-0.8704,869.19,811.02) translate(37.5px,38.5px) scale(0.675) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7826" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8704,0.4923,-0.4923,-0.8704,874.19,901.02) translate(37.5px,38.5px) scale(0.637) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7882" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8704,0.4923,-0.4923,-0.8704,877.19,1010.02) translate(37.5px,38.5px) scale(0.712) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6805" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.3132,0.9497,-0.9497,-0.3132,71.92,303.94) translate(37.5px,38.5px) scale(0.679) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7378" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8567,0.5158,-0.5158,-0.8567,166.29,431.31) translate(37.5px,38.5px) scale(0.625) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7434" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(-0.8567,0.5158,-0.5158,-0.8567,177.97,623.97) translate(37.5px,38.5px) scale(0.774) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7266" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.0587,0.9983,-0.9983,0.0587,284.85,639.80) translate(37.5px,38.5px) scale(0.731) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7322" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.1404,0.9901,-0.9901,0.1404,435.24,603.00) translate(37.5px,38.5px) scale(0.704) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7490" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6985,0.7156,-0.7156,0.6985,615.10,474.00) translate(37.5px,38.5px) scale(0.733) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7546" style="left:0;top:0;width:75px;height:77px;transform-origin:0 0;transform:matrix(0.6985,0.7156,-0.7156,0.6985,524.10,528.00) translate(37.5px,38.5px) scale(0.724) translate(-37.5px,-38.5px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/boot-pair.svg"></div>
+     </div>
+     <div class="mv-shoe" data-shoe="sneaker">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6722" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9964,0.0842,-0.0842,0.9964,474.32,326.00) translate(39.83px,37.53px) scale(0.756) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7212" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9998,0.0212,-0.0212,0.9998,423.59,220.00) translate(39.83px,37.53px) scale(0.690) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:8046" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(-0.6482,-0.7614,0.7614,-0.6482,336.86,298.03) translate(39.83px,37.53px) scale(0.632) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:8073" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(-0.6482,-0.7614,0.7614,-0.6482,278.64,400.31) translate(39.83px,37.53px) scale(0.625) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:8100" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(-0.6482,-0.7614,0.7614,-0.6482,197.64,488.31) translate(39.83px,37.53px) scale(0.612) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:8127" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(-0.6482,-0.7614,0.7614,-0.6482,30.64,603.31) translate(39.83px,37.53px) scale(0.805) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7239" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9912,0.132,-0.132,0.9912,399.91,107.00) translate(39.83px,37.53px) scale(0.612) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7938" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9912,0.132,-0.132,0.9912,419.91,-3.00) translate(39.83px,37.53px) scale(0.486) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6926" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9268,-0.3755,0.3755,0.9268,514.00,423.91) translate(39.83px,37.53px) scale(0.649) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7965" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9268,-0.3755,0.3755,0.9268,603.00,563.91) translate(39.83px,37.53px) scale(0.789) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6953" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.7639,-0.6453,0.6453,0.7639,581.63,508.54) translate(39.83px,37.53px) scale(0.767) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6980" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9992,-0.039,0.039,0.9992,660.69,575.94) translate(39.83px,37.53px) scale(0.783) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:8019" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9992,-0.039,0.039,0.9992,646.00,668.11) translate(39.83px,37.53px) scale(0.791) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7007" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9339,0.3576,-0.3576,0.9339,635.69,690.51) translate(39.83px,37.53px) scale(0.753) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7034" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9339,0.3576,-0.3576,0.9339,571.85,817.00) translate(39.83px,37.53px) scale(0.685) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:7061" style="left:0;top:0;width:79.66px;height:75.06px;transform-origin:0 0;transform:matrix(0.9339,0.3576,-0.3576,0.9339,502.58,935.12) translate(39.83px,37.53px) scale(0.545) translate(-39.83px,-37.53px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/sneaker-pair.svg"></div>
+     </div>
+     <div class="mv-shoe" data-shoe="dress">
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6866" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.3097,0.9508,-0.9508,0.3097,534.92,743.00) translate(35.565px,36.24px) scale(0.748) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6871" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.2249,0.9744,-0.9744,0.2249,624.63,705.00) translate(35.565px,36.24px) scale(0.752) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6881" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.1898,0.9818,-0.9818,0.1898,732.17,711.00) translate(35.565px,36.24px) scale(0.746) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6896" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.1445,0.9895,-0.9895,-0.1445,899.00,573.47) translate(35.565px,36.24px) scale(0.569) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6901" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.1445,0.9895,-0.9895,-0.1445,962.00,557.47) translate(35.565px,36.24px) scale(0.504) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6906" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.6938,0.7202,-0.7202,-0.6938,1072.55,639.29) translate(35.565px,36.24px) scale(0.659) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6911" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.7639,0.6453,-0.6453,-0.7639,1203.11,711.37) translate(35.565px,36.24px) scale(0.843) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6916" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.9915,-0.1301,0.1301,-0.9915,1223.10,888.20) translate(35.565px,36.24px) scale(0.740) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6921" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(-0.9915,-0.1301,0.1301,-0.9915,1209.52,1011.12) translate(35.565px,36.24px) scale(0.715) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6886" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.4736,0.8807,-0.8807,0.4736,766.84,646.00) translate(35.565px,36.24px) scale(0.792) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+    <div class="fp-unit fp-step absolute overflow-hidden" data-node-id="26:6861" style="left:0;top:0;width:71.13px;height:72.48px;transform-origin:0 0;transform:matrix(0.612,0.7909,-0.7909,0.612,443.32,793.00) translate(35.565px,36.24px) scale(0.674) translate(-35.565px,-36.24px)"><img alt="" class="absolute block inset-0 size-full max-w-none" src="assets/v2/feet/dress-pair.svg"></div>
+     </div>
+    </div>
+  </div>
+
+  <!-- ===== over-sculpture data ===== -->
+
+  <!-- 6 · physical touch -->
+  <div class="layer" data-for="touch">
+    <!-- hand: three stacked rings (most touched) -->
+    <div class="tring left-[443px] top-[503px] w-[114px] h-[114px]" style="animation-delay:0s"><img alt="" src="assets/touch_e104.svg"></div>
+    <div class="tring left-[449px] top-[509px] w-[101px] h-[101px]" style="animation-delay:.25s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[457px] top-[517px] w-[85px] h-[85px]" style="animation-delay:.5s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- head: two rings -->
+    <div class="tring day-only left-[759.5px] top-[217.5px] w-[101px] h-[101px]" style="animation-delay:.9s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[767.5px] top-[225.5px] w-[85px] h-[85px]" style="animation-delay:1.15s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- torso / other: single rings -->
+    <div class="tring left-[597.5px] top-[612.5px] w-[85px] h-[85px]" style="animation-delay:1.6s"><img alt="" src="assets/touch_e103.svg"></div>
+    <div class="tring left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" style="animation-delay:2.1s"><img alt="" src="assets/touch_e103.svg"></div>
+
+    <div class="spot left-[443px] top-[503px] w-[114px] h-[114px]" tabindex="0" aria-label="Hand" data-day="42%" data-night="51%"></div>
+    <p class="spot-label left-[450px] top-[617px] m-0">Hand<br><span class="d">42%</span><span class="n">51%</span></p>
+    <div class="spot left-[759.5px] top-[217.5px] w-[101px] h-[101px]" tabindex="0" aria-label="Head" data-day="28%" data-night="17%"></div>
+    <p class="spot-label left-[759.5px] top-[321.5px] m-0">Head<br><span class="d">28%</span><span class="n">17%</span></p>
+    <div class="spot left-[597.5px] top-[612.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Torso" data-day="18%" data-night="22%"></div>
+    <p class="spot-label left-[588.5px] top-[697.5px] m-0">Torso<br><span class="d">18%</span><span class="n">22%</span></p>
+    <div class="spot left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Other" data-day="12%" data-night="10%"></div>
+    <p class="spot-label left-[1006.5px] top-[734.5px] m-0">Other<br><span class="d">12%</span><span class="n">10%</span></p>
+
+    <!-- legend (shown while this is the most recent view) -->
+    <div class="legend absolute inset-0" id="legend-touch">
+      <div class="legend-card" role="img" aria-label="Legend: the bigger the glow, the more often people touched there">
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:30px"></span><span class="tx">80–100%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:25px"></span><span class="tx">60–80%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:20px"></span><span class="tx">40–60%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:15px"></span><span class="tx">20–40%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:10px"></span><span class="tx">0–20%</span>
+      </div>
+    </div>
+    <h2 class="title">Physical Touch</h2>
+    <p class="subtitle">Where people touched the sculpture</p>
+  </div>
+
+  <!-- 3 · duration -->
+  <div class="layer passive" data-for="duration">
+    <!-- eyes placed exactly as in Figma (day 57:13400, night 57:15925); the wider the eye, the longer people looked -->
+    <div class="dur-day">
+      <div class="dur-eye absolute" data-node-id="57:13972" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(-0.4967,0.8679,-0.8679,-0.4967,1074.21,180.21)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13976" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(-0.1882,-0.9821,0.9821,-0.1882,1311.92,804.08)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:15921" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(0.0856,-0.9963,0.9963,0.0856,829.68,1019.25)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:14572" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(0.3001,-0.9539,0.9539,0.3001,558.00,449.69)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13973" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(0.7716,-0.6361,0.6361,0.7716,-23.00,784.81)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:15907" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(-0.6099,0.7925,-0.7925,-0.6099,1312.58,146.83)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:14593" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(0.4236,0.9059,-0.9059,0.4236,690.81,102.00)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13980" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(0.8992,0.4376,-0.4376,0.8992,342.95,320.00)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:14582" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(-0.5301,-0.848,0.848,-0.5301,1045.84,806.42)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13974" style="left:0;top:0;width:84.58px;height:61.08px;transform-origin:0 0;transform:matrix(-0.91,0.4145,-0.4145,-0.91,1535.29,366.59)"><img alt="" src="assets/v2/eyes/eye-l.svg" style="left:-2.5px;top:-2.5px;width:89.5823px;height:66.0805px"></div>
+      <div class="dur-eye absolute" data-node-id="57:14576" style="left:0;top:0;width:84.58px;height:61.08px;transform-origin:0 0;transform:matrix(0.1123,-0.9937,0.9937,0.1123,514.00,846.05)"><img alt="" src="assets/v2/eyes/eye-l.svg" style="left:-2.5px;top:-2.5px;width:89.5823px;height:66.0805px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13984" style="left:0;top:0;width:84.58px;height:61.08px;transform-origin:0 0;transform:matrix(0.6472,-0.7623,0.7623,0.6472,699.49,593.79)"><img alt="" src="assets/v2/eyes/eye-l.svg" style="left:-2.5px;top:-2.5px;width:89.5823px;height:66.0805px"></div>
+      <div class="dur-eye absolute" data-node-id="57:15918" style="left:0;top:0;width:84.58px;height:61.08px;transform-origin:0 0;transform:matrix(0.6583,0.7527,-0.7527,0.6583,384.98,208.00)"><img alt="" src="assets/v2/eyes/eye-l.svg" style="left:-2.5px;top:-2.5px;width:89.5823px;height:66.0805px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13975" style="left:0;top:0;width:84.58px;height:75.99px;transform-origin:0 0;transform:matrix(0.9265,0.3763,-0.3763,0.9265,-6.41,268.00)"><img alt="" src="assets/v2/eyes/eye-xl.svg" style="left:-2.5px;top:-2.5px;width:89.5824px;height:80.9907px"></div>
+      <div class="dur-eye absolute" data-node-id="57:13987" style="left:0;top:0;width:84.58px;height:75.99px;transform-origin:0 0;transform:matrix(0.9487,-0.3162,0.3162,0.9487,274.00,602.75)"><img alt="" src="assets/v2/eyes/eye-xl.svg" style="left:-2.5px;top:-2.5px;width:89.5824px;height:80.9907px"></div>
+    </div>
+    <div class="dur-night">
+      <div class="dur-eye absolute" data-node-id="57:16482" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(-0.7155,-0.6986,0.6986,-0.7155,1336.48,796.28)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16541" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(0.0194,-0.9998,0.9998,0.0194,1054.00,1027.58)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16486" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(0.0856,-0.9963,0.9963,0.0856,567.00,1029.28)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16490" style="left:0;top:0;width:84.59px;height:15.92px;transform-origin:0 0;transform:matrix(0.8724,-0.4889,0.4889,0.8724,106.15,726.46)"><img alt="" src="assets/v2/eyes/eye-s.svg" style="left:-2.5px;top:-2.5px;width:89.5923px;height:20.92px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16502" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(-0.4629,-0.8864,0.8864,-0.4629,812.16,736.68)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16537" style="left:0;top:0;width:84.59px;height:29.6px;transform-origin:0 0;transform:matrix(-0.893,0.4502,-0.4502,-0.893,1338.86,241.43)"><img alt="" src="assets/v2/eyes/eye-m.svg" style="left:-2.5px;top:-2.5px;width:89.5921px;height:34.1901px"></div>
+      <div class="dur-eye absolute" data-node-id="57:16520" style="left:0;top:0;width:84.58px;height:61.08px;transform-origin:0 0;transform:matrix(0.3887,0.9214,-0.9214,0.3887,392.87,73.73)"><img alt="" src="assets/v2/eyes/eye-l.svg" style="left:-2.5px;top:-2.5px;width:89.5823px;height:66.0805px"></div>
+    </div>
+    <div class="legend absolute inset-0" id="legend-duration">
+      <div class="legend-card" role="img" aria-label="Legend: the wider the eye, the longer people looked">
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-s.svg"></span><span class="tx">5 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-m.svg"></span><span class="tx">15 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-l.svg"></span><span class="tx">25 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-xl.svg"></span><span class="tx">+ 25 min</span>
+      </div>
+    </div>
+    <h2 class="title">Duration</h2>
+    <p class="subtitle">How long do people look at or stay near the sculpture</p>
+  </div>
+
+  <!-- 5 · group size -->
+  <div class="layer passive" data-for="group">
+    <!-- People 1 (single visitors) -->
+    <div class="grp absolute h-[89.737px] left-[1087px] top-[175px] w-[90.077px]" style="--i:0">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F5.svg">
+    </div>
+    <div class="grp absolute flex h-[127.119px] items-center justify-center left-[1413.67px] top-[562.63px] w-[127.128px]" style="--i:0">
+      <div class="flex-none rotate-[43.88deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F13.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[107.13px] items-center justify-center left-[111.8px] top-[193.62px] w-[106.87px]" style="--i:0">
+      <div class="flex-none rotate-[77.7deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F10.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[126.717px] items-center justify-center left-[509.06px] top-[492.21px] w-[126.756px]" style="--i:0">
+      <div class="flex-none rotate-[40.39deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F7.svg">
+      </div></div>
+    </div>
+    <!-- People 2 (pairs) -->
+    <div class="grp absolute h-[135px] left-[1257px] top-[40px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F3.svg">
+    </div>
+    <div class="grp absolute h-[135px] left-[912px] top-[874px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F3.svg">
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[369.74px] top-[-62.12px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F11.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[66px] top-[358px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F11.svg">
+      </div></div>
+    </div>
+    <!-- People 3 -->
+    <div class="grp absolute h-[139px] left-[409px] top-[797px] w-[145px]" style="--i:2">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F4.svg">
+    </div>
+    <!-- People 4 -->
+    <div class="grp absolute h-[137px] left-[269px] top-[142px] w-[133px]" style="--i:3">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F14.svg">
+    </div>
+    <div class="grp absolute left-[912px] top-[639px] w-[133px] h-[139px]" style="--i:3">
+      <div class="spin ccw absolute inset-0">
+        <img alt="" class="absolute max-w-none left-[92px] top-[37px] w-[21px] h-[23px]" src="assets/v2/group/grp_v0.svg">
+        <img alt="" class="absolute max-w-none left-[74px] top-[13px] w-[59px] h-[61px]" src="assets/v2/group/grp_v1.svg">
+        <img alt="" class="absolute max-w-none left-[31px] top-[25px] w-[23px] h-[21px]" src="assets/v2/group/grp_v2.svg">
+        <img alt="" class="absolute max-w-none left-[6px] top-[0px] w-[63px] h-[62px]" src="assets/v2/group/grp_v3.svg">
+        <img alt="" class="absolute max-w-none left-[23px] top-[80px] w-[22px] h-[22px]" src="assets/v2/group/grp_v4.svg">
+        <img alt="" class="absolute max-w-none left-[0px] top-[66px] w-[62px] h-[62px]" src="assets/v2/group/grp_v5.svg">
+        <img alt="" class="absolute max-w-none left-[77px] top-[94px] w-[23px] h-[22px]" src="assets/v2/group/grp_v6.svg">
+        <img alt="" class="absolute max-w-none left-[63px] top-[77px] w-[62px] h-[60px]" src="assets/v2/group/grp_v7.svg">
+      </div>
+    </div>
+    <!-- People 5 -->
+    <div class="grp absolute h-[158px] left-[43px] top-[629px] w-[165px]" style="--i:4">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F9.svg">
+    </div>
+    <!-- People 6 -->
+    <div class="grp absolute h-[182px] left-[868px] top-[380px] w-[188px]" style="--i:5">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/v2/group/grp_F8.svg">
+    </div>
+
+    <!-- legend: one shape per group size, in the same colour as the groups (lavender by day, green at night) -->
+    <div class="legend absolute inset-0" id="legend-group">
+      <div class="legend-card" role="img" aria-label="Legend: groups of one to six people">
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F5.svg"></span><span class="tx">1 person</span>
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F3.svg"></span><span class="tx">2 people</span>
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F4.svg"></span><span class="tx">3 people</span>
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F14.svg"></span><span class="tx">4 people</span>
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F9.svg"></span><span class="tx">5 people</span>
+        <span class="sw"><img alt="" src="assets/v2/group/grp_F8.svg"></span><span class="tx">6 people</span>
+      </div>
+    </div>
+    <h2 class="title">Group Size</h2>
+    <p class="subtitle">Whether people pass by alone, in pairs, or in groups</p>
+  </div>
+
+  <!-- 2 · emotion legend + title -->
+  <div class="layer passive" data-for="emotion">
+    <div class="legend absolute inset-0" id="legend-emotion">
+      <div class="legend-card" role="img" aria-label="Legend: the moods people showed and their share">
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/calm.svg"></span><span class="tx day-only">Calm <span class="val">~35%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/excited.svg"></span><span class="tx day-only">Excited <span class="val">~25%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/energetic.svg"></span><span class="tx day-only">Energetic <span class="val">~20%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></span><span class="tx day-only">Curiosity <span class="val">~20%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/tired.svg"></span><span class="tx night-only">Tired <span class="val">~35%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></span><span class="tx night-only">Energetic <span class="val">~25%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></span><span class="tx night-only">Curiosity <span class="val">~25%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/angry.svg"></span><span class="tx night-only">Angry <span class="val">~15%</span></span>
+      </div>
+    </div>
+    <h2 class="title">Emotion/Facial Expression</h2>
+    <p class="subtitle">How people felt around the sculpture</p>
+  </div>
+
+  <!-- 4 · movement title (shown in the caption) -->
+  <div class="layer" data-for="movement">
+    <h2 class="title">Movement</h2>
+    <p class="subtitle">People’s Walking Path Around The Sculpture And The Surrounding</p>
+  </div>
+
+  <!-- decorate your own Circle Dance: drag the infographic shapes onto the dancers, then capture -->
+  <div id="board" class="deco-ui" aria-label="Decorating board"></div>
+  <div id="tray" class="deco-ui" role="toolbar" aria-label="Shapes — drag onto the dancers, or click to add"></div>
+  <div id="tools" class="deco-ui">
+    <button class="pill" id="d-clear">clear</button>
+    <button class="pill" id="d-gallery">gallery</button>
+    <button class="pill go" id="d-capture">capture</button>
+  </div>
+  <div id="undo-bar" class="deco-ui" role="status" aria-live="polite">
+    <span id="undo-text"></span>
+    <button class="pill" id="undo-btn" type="button">undo</button>
+  </div>
+  <div id="flash"></div>
+  <img id="deco-cursor" alt="" aria-hidden="true">
+
+  <!-- gallery: everything people have captured -->
+  <section id="gallery" aria-label="Gallery" aria-hidden="true">
+    <h2>gallery</h2>
+    <p class="count" id="g-count"></p>
+    <div class="g-tools">
+      <button class="pill go" id="g-decorate">decorate your own</button>
+      <button class="pill" id="g-close">close</button>
+    </div>
+    <div id="g-grid"></div>
+  </section>
+  <div id="name-dialog" role="dialog" aria-modal="true" aria-labelledby="name-label" aria-hidden="true">
+    <form id="name-form" autocomplete="off">
+      <label id="name-label" for="d-name">Who decorated this?</label>
+      <input id="d-name" name="name" maxlength="40" placeholder="your name" spellcheck="false">
+      <p class="hint">Your name appears with your Circle Dance in the gallery.</p>
+      <div class="row">
+        <button class="pill go" type="submit">upload to gallery</button>
+        <button class="pill" type="button" id="name-cancel">cancel</button>
+      </div>
+    </form>
+  </div>
+  <div id="lightbox" role="dialog" aria-label="Capture" aria-hidden="true">
+    <div>
+      <img id="lb-img" alt="A decorated Circle Dance">
+      <p id="lb-meta"></p>
+      <div class="lb-tools">
+        <a class="pill" id="lb-save" download="circle-dance.png">save image</a>
+        <button class="pill danger" id="lb-delete" hidden>delete</button>
+        <button class="pill" id="lb-close">close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 · history -->
+  <div class="layer" data-for="history" id="history">
+    <div id="hist-circle" role="dialog" aria-modal="false" aria-label="History of Circle Dance">
+      <div class="hist-backdrop" aria-hidden="true"><div class="hb-art">
+        <img alt="" src="assets/v2/grass.svg" style="left:-12px;top:-13px;width:1552.2px;height:1032.19px">
+        <img alt="" src="assets/v2/dancers.svg" style="left:222px;top:247px;width:1132px;height:585px">
+      </div></div>
+      <!-- coordinates inside the circle are artboard coords minus (397,194) -->
+      <div class="slide on" data-n="0">
+        <div class="slide-body">
+          <h3 class="slide-head">THE SCULPTURE</h3>
+          <p class="slide-text">Created in 2010, Circle Dance consists of eleven life-size figures holding hands in a circle. Installed at Brown University in 2012, the sculpture brings a sense of movement and energy to the campus.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="1">
+        <div class="slide-body">
+          <h3 class="slide-head">THE INSPIRATION</h3>
+          <p class="slide-text" style="max-width:420px">Inspired by Henri Matisse’s La Danse (1910), the sculpture echoes the painting’s circular arrangement of dancing figures. Their linked hands can be interpreted as symbols of unity, movement, and shared experience.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="2">
+        <div class="slide-body">
+          <h3 class="slide-head">THE ARTIST <span class="amp">&amp;</span> MATERIAL</h3>
+          <p class="slide-text" style="max-width:399px;font-size:25px;line-height:1.5;letter-spacing:-0.55px">Tom Friedman is a conceptual sculptor known for transforming everyday materials. He originally modeled Circle Dance using aluminum roasting pans, preserving their impressions in the final stainless-steel sculpture.</p>
+        </div>
+      </div>
+
+      <button class="icon-btn" id="hist-prev" aria-label="Previous" style="left:22px;top:334px"><img alt="" src="assets/icon_chevron.svg" style="transform:rotate(180deg)"></button>
+      <button class="icon-btn" id="hist-next" aria-label="Next" style="left:672px;top:334px"><img alt="" src="assets/icon_chevron.svg"></button>
+      <button class="icon-btn" id="hist-close" aria-label="Close" style="left:339px;top:667px;width:33px;height:34px"><img alt="" src="assets/icon_x.svg"></button>
+    </div>
+    <h2 class="title">History</h2>
+    <p class="subtitle">Historical Information About Circle Dance</p>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const W = 1512, H = 982;
+  const stage = document.getElementById('stage');
+  let scale = 1;
+  function fit() {
+    scale = Math.min(innerWidth / W, innerHeight / H);
+    stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  /* ---------- button sounds: a soft, woody kalimba "tok" on a pentatonic scale (generated, no audio file;
+     the same sound as the other Circle Dance site) ---------- */
+  const NOTES = [523.25, 587.33, 659.25, 783.99, 880];   // C5 D5 E5 G5 A5
+  let sfx;
+  function pluck(freq) {
+    sfx = sfx || new (window.AudioContext || window.webkitAudioContext)();
+    sfx.resume();
+    const t = sfx.currentTime, out = sfx.createGain(), lp = sfx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2200;
+    out.gain.setValueAtTime(0, t);
+    out.gain.linearRampToValueAtTime(.14, t + .006);
+    out.gain.exponentialRampToValueAtTime(.0001, t + .55);
+    lp.connect(out).connect(sfx.destination);
+    // fundamental + a quiet bell-like overtone that fades faster
+    [[freq, 1, .55], [freq * 2.76, .18, .18]].forEach(([f, amp, len]) => {
+      const o = sfx.createOscillator(), g = sfx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(amp, t); g.gain.exponentialRampToValueAtTime(.0001, t + len);
+      o.connect(g).connect(lp); o.start(t); o.stop(t + len + .05);
+    });
+  }
+  // each kind of control gets its own note, so the site plays like one quiet instrument
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    const i = b.classList.contains('dot') ? (b.dataset.go === 'decorate' ? 2 : (+b.dataset.c - 1) % 5)   // ring: a note per view
+            : b.id === 'daynight' ? (night ? 4 : 0)                // runs before the switch flips: brighter going to day
+            : b.classList.contains('thumb') ? 3
+            : 2;
+    pluck(NOTES[i]);
+  }, true);
+
+  /* ear: the night-time crickets at night, people talking by day (both loop; the one for the other mode
+     sits silent so switching day/night can crossfade); click again to stop */
+  const ambience = ['assets/crickets.m4a', 'assets/people-talking.m4a'].map(src => {
+    const a = new Audio(src); a.loop = true; a.preload = 'auto'; a.volume = 0; return a;
+  });
+  const AMBIENT_VOL = [0.7, 0.55];
+  const levels = () => night ? [AMBIENT_VOL[0], 0] : [0, AMBIENT_VOL[1]];   // [crickets, people talking]
+  const earBtn = document.getElementById('ear');
+  let earOn = false, fadeRaf;
+  function fadeTo(target, ms, done) {
+    cancelAnimationFrame(fadeRaf);
+    const from = ambience.map(a => a.volume), t0 = performance.now();
+    const tick = now => {
+      const k = Math.min(1, Math.max(0, (now - t0) / ms));
+      const to = target ? levels() : [0, 0];
+      ambience.forEach((a, i) => { a.volume = Math.min(1, Math.max(0, from[i] + (to[i] - from[i]) * k)); });
+      if (k < 1) fadeRaf = requestAnimationFrame(tick); else if (done) done();
+    };
+    fadeRaf = requestAnimationFrame(tick);
+  }
+  function setEar(on) {
+    if (on === earOn) return;
+    earOn = on;
+    earBtn.setAttribute('aria-pressed', String(earOn));
+    earBtn.setAttribute('aria-label', earOn ? 'Stop ambient sound' : 'Play ambient sound');
+    if (earOn) { ambience.forEach(a => a.play().catch(() => {})); fadeTo(true, 1200); }
+    else fadeTo(false, 800, () => ambience.forEach(a => a.pause()));
+  }
+  earBtn.addEventListener('click', () => setEar(!earOn));
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- day / night: every data view has a day set and a night set; the switch flips them all ---------- */
+  let night = false;
+  const dnBtn = document.getElementById('daynight'), dnLabel = document.getElementById('daynight-label');
+  function setNight(on) {
+    night = on;
+    body.classList.toggle('night', on);
+    document.documentElement.classList.toggle('night', on);
+    dnBtn.setAttribute('aria-pressed', String(on));
+    dnBtn.setAttribute('aria-label', on ? 'Show the day data' : 'Show the night data');
+    dnLabel.textContent = on ? 'day' : 'night';
+    document.querySelectorAll('.spot[data-day]').forEach(el => {
+      el.setAttribute('aria-label', el.getAttribute('aria-label').split(' ')[0] + ' ' + (on ? el.dataset.night : el.dataset.day));
+    });
+    // group size: lavender shapes by day, the original green at night
+    document.querySelectorAll('.layer[data-for="group"] img[src*="grp_"]').forEach(img => {
+      const name = img.getAttribute('src').split('/').pop();
+      img.setAttribute('src', (on ? 'assets/' : 'assets/v2/group/') + name);
+    });
+    if (typeof render === 'function') render();
+    keepInside();                                                     // the other set may have shapes at the edge
+    if (earOn) fadeTo(true, 1500);                                    // crossfade to the other mode's sound
+  }
+  dnBtn.addEventListener('click', () => setNight(!night));
+
+  const body = document.body;
+  const dots = [...document.querySelectorAll('.dot[data-go]')];
+  const views = dots.filter(d => d.dataset.go !== 'decorate');
+
+  /* Data layers stack: each ring circle turns its own infographic on or off, so several can be
+     layered at once. History is a pop-up on top of whatever is showing. The caption, ring label
+     and legend follow the most recently opened layer. */
+  const NAMES = { home: 'Circle Dance', history: 'history', emotion: 'emotion', duration: 'duration',
+                  movement: 'movement', group: 'group size', touch: 'physical touch', decorate: 'decorate' };
+  const CAPTIONS = {
+    home: 'Circle Dance Brings People Together',
+    history: 'Historical information about Circle Dance',
+    emotion: 'How people felt around the sculpture',
+    duration: 'How long people look at or stay near the sculpture',
+    movement: 'People’s walking path around the sculpture’s site',
+    group: 'Whether people pass by alone, in pairs, or in groups',
+    touch: 'Where people touched the sculpture',
+    decorate: 'Decorate your own Circle Dance: pick a shape, then click to place it',
+  };
+  const LEGENDS = ['emotion', 'duration', 'group', 'touch'];   // Movement has no legend in the new design
+  const circle = n => document.querySelector(`#ring svg circle[data-c="${n}"]`);
+
+  /* ring label: one spot beside the ring (as in the Figma frame); the word tilts to follow the
+     circle it belongs to, so it swings round as you move along the ring */
+  const label = document.getElementById('ring-label');
+  const RING_C = 47.44, TILT = 48.14;     // ring centre; Movement (due east) tilts 48°, as in Figma
+  function tilt(dot) {
+    if (dot.dataset.go === 'decorate') return 0;   // the centre circle has no direction
+    const a = Math.atan2(parseFloat(dot.style.top) - RING_C, parseFloat(dot.style.left) - RING_C) * 180 / Math.PI + TILT;
+    return ((a + 90) % 180 + 180) % 180 - 90;  // keep the word readable (never upside down)
+  }
+  let hovered = null;
+  function showLabel() {
+    const top = body.dataset.top;
+    const dot = hovered || dots.find(d => d.dataset.go === top);
+    label.classList.toggle('on', !!dot);
+    if (!dot) return;
+    label.textContent = NAMES[dot.dataset.go];
+    label.style.setProperty('--r', tilt(dot).toFixed(2) + 'deg');
+  }
+
+  const caption = document.getElementById('caption');
+  const NIGHT_VIEWS = ['emotion', 'duration', 'movement', 'group', 'touch'];
+  function setCaption(key) {
+    const text = CAPTIONS[key] + (night && NIGHT_VIEWS.includes(key) ? ', at night' : '');
+    if (caption.textContent === text) return;
+    caption.classList.add('swap');
+    clearTimeout(setCaption.t);
+    setCaption.t = setTimeout(() => { caption.textContent = text; caption.classList.remove('swap'); }, 300);
+  }
+
+  const active = [];                      // open data layers, oldest first
+  let historyOpen = false;
+  function render() {
+    for (const b of views) {
+      const n = b.dataset.go;
+      const on = n === 'history' ? historyOpen : active.includes(n);
+      body.classList.toggle('on-' + n, on);
+      b.setAttribute('aria-pressed', String(on));
+      circle(b.dataset.c).classList.toggle('on', on);
+    }
+    body.classList.toggle('none-on', !active.length && !historyOpen && !decorating);
+    body.classList.toggle('decorating', decorating);
+    if (!decorating && brush) setBrush(null);
+    circle(0).classList.toggle('on', decorating);
+    document.querySelector('.dot[data-go="decorate"]').setAttribute('aria-pressed', String(decorating));
+    const top = decorating ? 'decorate' : historyOpen ? 'history' : (active[active.length - 1] || 'home');
+    body.dataset.top = top;
+    if (LEGENDS.includes(top)) legend(top, true); else LEGENDS.forEach(n => legend(n, false));
+    setCaption(top);
+    showLabel();
+    showOpen();
+  }
+  const showing = document.getElementById('showing');
+  function showOpen() {
+    const open = [...active, ...(historyOpen ? ['history'] : [])];
+    showing.replaceChildren();
+    if (!open.length) return;
+    showing.insertAdjacentHTML('beforeend', '<span class="lbl">showing</span>');
+    for (const n of open) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.setAttribute('aria-label', `Turn off ${NAMES[n]}`);
+      b.innerHTML = `<span></span><span class="x" aria-hidden="true">×</span>`;
+      b.firstChild.textContent = NAMES[n] + (night && NIGHT_VIEWS.includes(n) ? ' · night' : '');
+      b.addEventListener('click', () => toggle(n));
+      showing.appendChild(b);
+    }
+    if (open.length > 1) {
+      const all = document.createElement('button');
+      all.className = 'chip all';
+      all.textContent = 'clear all';
+      all.addEventListener('click', clearAll);
+      showing.appendChild(all);
+    }
+  }
+  let decorating = false;
+  let brush = null;                       // the tray shape picked up as the cursor, if any
+  function toggle(n) {
+    if (n === 'decorate') { if (!decorating) clearAll(); decorating = !decorating; if (!decorating) select(null); return render(); }
+    if (decorating) { decorating = false; select(null); }   // opening a view leaves the decorating board
+    if (n === 'history') { historyOpen = !historyOpen; if (historyOpen) show(0); return render(); }
+    const i = active.indexOf(n);
+    if (i >= 0) { active.splice(i, 1); leave(n); } else active.push(n);
+    render();
+  }
+  function clearAll() {
+    historyOpen = false;
+    decorating = false;
+    if (typeof select === 'function') select(null);
+    while (active.length) leave(active.pop());
+    render();
+  }
+  dots.forEach(d => {
+    d.addEventListener('click', () => toggle(d.dataset.go));
+    const hot = on => { hovered = on ? d : null; circle(d.dataset.c).classList.toggle('hot', on); showLabel(); };
+    d.addEventListener('pointerenter', () => hot(true));
+    d.addEventListener('pointerleave', () => hot(false));
+    d.addEventListener('focus', () => hot(true));
+    d.addEventListener('blur', () => hot(false));
+  });
+  // the title goes back to the start screen
+  document.getElementById('wordmark').addEventListener('click', clearAll);
+  addEventListener('keydown', e => {
+    if (decorating && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !e.target.closest?.('input, textarea')) {
+      e.preventDefault(); return undo();
+    }
+    if (e.key === 'Escape') {
+      if (nameDialog.classList.contains('on')) return askName(false);
+      if (lightbox.classList.contains('on')) return closeShot();
+      if (body.classList.contains('gallery-open')) return showGallery(false);
+      if (brush) return setBrush(null);
+      if (decorating && selected) return select(null);
+      if (historyOpen) toggle('history'); else clearAll();
+    }
+    if (decorating && selected && !e.target.closest?.('input, textarea, form')) {
+      const before = snapshot(), what = named(selected._st);
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSticker(selected); recordAndShowButton(before, 'Removed ' + what); }
+      if (e.key === '[' || e.key === ']') { nudge(selected, { r: e.key === ']' ? 10 : -10 }); recordAndShowButton(before, 'Turned ' + what); }
+      if (e.key === '+' || e.key === '=' || e.key === '-') { nudge(selected, { s: e.key === '-' ? 1 / 1.1 : 1.1 }); recordAndShowButton(before, 'Resized ' + what); }
+    }
+    if (historyOpen) {
+      if (e.key === 'ArrowRight') go(1);
+      if (e.key === 'ArrowLeft') go(-1);
+    }
+  });
+
+  function leave(s) { legend(s, false); }
+
+  /* ---------- history slides ---------- */
+  const slides = [...document.querySelectorAll('.slide')];
+  let cur = 0;
+  function show(n) {
+    cur = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((el, i) => el.classList.toggle('on', i === cur));
+    document.getElementById('hist-prev').style.visibility = cur === 0 ? 'hidden' : 'visible';
+    document.getElementById('hist-next').style.visibility = cur === slides.length - 1 ? 'hidden' : 'visible';
+  }
+  const go = d => show(cur + d);
+  document.getElementById('hist-prev').addEventListener('click', () => go(-1));
+  document.getElementById('hist-next').addEventListener('click', () => go(1));
+  document.getElementById('hist-close').addEventListener('click', () => toggle('history'));
+
+  /* ---------- parallax: as the mouse moves (pressed or not) every layer drifts the opposite way, all in the
+     same direction but each by its own amount and at its own speed: the curiosity icons barely moving and
+     slow to follow; the groups right at the front, swinging furthest and catching up fastest. So the layers
+     peel apart while the mouse moves and settle back together when it stops. While decorating or in the
+     gallery everything settles back to centre. ---------- */
+  (() => {
+    const SWING_X = 110, SWING_Y = 72;        // a depth-1 layer's full swing, edge to edge (px)
+    const LAYERS = [                          // depth (how far) and pace (how quickly it catches up, per frame)
+      // the moods: each kind of icon is its own sheet, so they drift past one another
+      { sel: '.emo-sheet[data-emo="curiosity"]', depth: .5,  pace: .04 },
+      { sel: '.emo-sheet[data-emo="calm"]',      depth: .9,  pace: .05 },
+      { sel: '.emo-sheet[data-emo="tired"]',     depth: 1.1, pace: .055 },
+      { sel: '.emo-sheet[data-emo="energetic"]', depth: 1.5, pace: .075 },
+      { sel: '.emo-sheet[data-emo="excited"]',   depth: 2.1, pace: .1 },
+      { sel: '.emo-sheet[data-emo="angry"]',     depth: 2.5, pace: .12 },
+      { sel: '.layer[data-for="touch"]',    depth: 1.1, pace: .065 },
+      { sel: '.layer[data-for="duration"]', depth: 1.7, pace: .08 },
+      // the footprints: each shoe type is its own sheet, so the trails slide past one another
+      { sel: '.mv-shoe[data-shoe="heels"]',   depth: 1.4, pace: .06 },
+      { sel: '.mv-shoe[data-shoe="dress"]',   depth: 2,   pace: .085 },
+      { sel: '.mv-shoe[data-shoe="sneaker"]', depth: 2.6, pace: .11 },
+      { sel: '.mv-shoe[data-shoe="boot"]',    depth: 3.3, pace: .14 },
+      { sel: '.layer[data-for="group"]',    depth: 3,   pace: .12 },
+    ].map(l => ({ ...l, els: [...document.querySelectorAll(l.sel)], x: 0, y: 0 }));
+    let mx = 0, my = 0;
+    const aim = e => { mx = e.clientX / innerWidth - .5; my = e.clientY / innerHeight - .5; };
+    addEventListener('pointerdown', aim);
+    addEventListener('pointermove', aim);
+    document.addEventListener('pointerleave', () => { mx = my = 0; });   // the mouse left the page: drift home
+    const still = () => reduce || body.classList.contains('decorating') || body.classList.contains('gallery-open');
+    function frame() {
+      const tx = still() ? 0 : -mx * SWING_X, ty = still() ? 0 : -my * SWING_Y;
+      for (const l of LAYERS) {
+        const gx = tx * l.depth, gy = ty * l.depth;
+        if (Math.abs(gx - l.x) < .02 && Math.abs(gy - l.y) < .02) continue;
+        l.x += (gx - l.x) * l.pace; l.y += (gy - l.y) * l.pace;
+        for (const el of l.els) { el.style.setProperty('--lx', l.x.toFixed(2) + 'px'); el.style.setProperty('--ly', l.y.toFixed(2) + 'px'); }
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+  /* ---------- keep every data shape whole: anything that pokes past the edge of the frame is slid inward
+     just far enough to sit fully inside it (shapes that spin get room for their whole turn) ---------- */
+  const EDGE = 12;                              // px kept clear between a shape and the frame's edge
+  function keepInside() {
+    // measure with the parallax at rest, so a passing mouse offset doesn't skew the check
+    body.classList.add('parallax-rest');
+    try { measureInside(); } finally { body.classList.remove('parallax-rest'); }
+  }
+  function measureInside() {
+    const sr = stage.getBoundingClientRect();
+    const shapes = [
+      ...document.querySelectorAll('#mv .fp-step'),
+      ...document.querySelectorAll('.grp'),
+      ...document.querySelectorAll('.dur-eye'),
+      ...document.querySelectorAll('.emo-icon'),
+    ];
+    for (const el of new Set(shapes)) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;      // not on show (the other day/night set)
+      const [ox, oy] = (el.dataset.inside || '0 0').split(' ').map(Number);
+      let x0 = (r.left - sr.left) / scale - ox, y0 = (r.top - sr.top) / scale - oy;
+      let x1 = x0 + r.width / scale, y1 = y0 + r.height / scale;
+      if (el.classList.contains('grp')) {       // a spinning group sweeps a circle around its centre
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rad = Math.hypot(x1 - x0, y1 - y0) / 2;
+        x0 = cx - rad; x1 = cx + rad; y0 = cy - rad; y1 = cy + rad;
+      }
+      const dx = x0 < EDGE ? EDGE - x0 : x1 > W - EDGE ? W - EDGE - x1 : 0;
+      const dy = y0 < EDGE ? EDGE - y0 : y1 > H - EDGE ? H - EDGE - y1 : 0;
+      el.dataset.inside = `${dx} ${dy}`;
+      el.style.translate = dx || dy ? `${dx.toFixed(1)}px ${dy.toFixed(1)}px` : '';
+    }
+  }
+  keepInside();
+
+
+  /* ---------- legends: they share the bottom-right corner, so only the newest view's is shown ---------- */
+  function legend(name, on) {
+    const el = document.getElementById('legend-' + name);
+    if (!el) return;                          // Movement and History have no legend
+    el.classList.toggle('on', on);
+    if (on) LEGENDS.filter(n => n !== name).forEach(n => legend(n, false));
+  }
+
+  /* ---------- decorate your own Circle Dance ---------- */
+  const STICKERS = [   // the shapes from the infographics, at a comfortable starting size (artboard px)
+    { g: 'touch',    src: 'touch_e104.svg', w: 114, h: 114 },
+    { g: 'touch',    src: 'touch_e103.svg', w: 85,  h: 85 },
+    { g: 'duration', src: 'v2/eyes/eye-xl.svg', w: 90, h: 81 },
+    { g: 'duration', src: 'v2/eyes/eye-l.svg',  w: 90, h: 66 },
+    { g: 'duration', src: 'v2/eyes/eye-m.svg',  w: 90, h: 34 },
+    { g: 'duration', src: 'v2/eyes/eye-s.svg',  w: 90, h: 21 },
+    { g: 'emotion',  src: 'v2/emo-icons/calm.svg',      w: 106, h: 99 },
+    { g: 'emotion',  src: 'v2/emo-icons/excited.svg',   w: 102, h: 95 },
+    { g: 'emotion',  src: 'v2/emo-icons/energetic.svg', w: 101, h: 86 },
+    { g: 'emotion',  src: 'v2/emo-icons/curiosity.svg', w: 76,  h: 143 },
+    { g: 'emotion',  src: 'v2/emo-icons/tired.svg',     w: 146, h: 90 },
+    { g: 'emotion',  src: 'v2/emo-icons/angry.svg',     w: 100, h: 113 },
+    { g: 'group',    src: 'grp_F5.svg',  w: 90,  h: 90 },
+    { g: 'group',    src: 'grp_F3.svg',  w: 109, h: 135 },
+    { g: 'group',    src: 'grp_F4.svg',  w: 145, h: 139 },
+    { g: 'group',    src: 'grp_F14.svg', w: 133, h: 137 },
+    { g: 'group',    src: 'grp_F9.svg',  w: 165, h: 158 },
+    { g: 'group',    src: 'grp_F8.svg',  w: 188, h: 182 },
+    { g: 'movement', src: 'v2/feet/heels-pair.svg',   w: 58, h: 61 },
+    { g: 'movement', src: 'v2/feet/boot-pair.svg',    w: 60, h: 63 },
+    { g: 'movement', src: 'v2/feet/sneaker-pair.svg', w: 60, h: 60 },
+    { g: 'movement', src: 'v2/feet/dress-pair.svg',   w: 59, h: 60 },
+  ];
+  const GROUP_NAMES = { touch: 'touch ring', duration: 'eye', emotion: 'mood', group: 'group', movement: 'pair of footprints' };
+  const board = document.getElementById('board');
+  const tray = document.getElementById('tray');
+  const TRAY_TOP = 836;                       // dropping a shape back on the tray removes it
+  const toStage = e => {
+    const r = stage.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  };
+
+  STICKERS.forEach((st, i) => {
+    if (i && STICKERS[i - 1].g !== st.g) tray.insertAdjacentHTML('beforeend', '<span class="sep" aria-hidden="true"></span>');
+    const b = document.createElement('button');
+    b.className = 'thumb';
+    b.setAttribute('aria-label', 'Add ' + GROUP_NAMES[st.g]);
+    b.innerHTML = `<img alt="" src="assets/${st.src}" draggable="false">`;
+    b._st = st;
+    b.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      if (brush === st) return setBrush(null);            // clicking the picked shape again puts it down
+      const p = toStage(e), before = snapshot();
+      startDrag(addSticker(st, p.x, p.y), e, true, false, before);   // drag it straight out, or (a plain click) pick it up
+    });
+    b.addEventListener('keydown', e => {      // keyboard: Enter / Space drops the shape in the middle
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      const before = snapshot();
+      select(addSticker(st, 756 + (Math.random() - .5) * 240, 520 + (Math.random() - .5) * 160));
+      recordAndShowButton(before, 'Placed ' + named(st));
+    });
+    tray.appendChild(b);
+  });
+
+  /* ---------- undo: the board is snapshotted before each change; undo puts the last snapshot back ---------- */
+  const history = [];
+  const undoBar = document.getElementById('undo-bar'), undoText = document.getElementById('undo-text');
+  const named = st => { const n = GROUP_NAMES[st.g]; return (/^[aeiou]/.test(n) ? 'an ' : 'a ') + n; };
+  const snapshot = () => JSON.stringify({
+    s: [...board.children].map(el => ({ i: STICKERS.indexOf(el._st), t: el._t })),
+    f: [...fillList.children].map(f => ({ r: f.dataset.region, i: STICKERS.indexOf(f._st) })) });
+  function restore(json) {
+    const d = JSON.parse(json);
+    select(null);
+    board.replaceChildren(); fillList.replaceChildren();
+    d.s.forEach(o => { const el = addSticker(STICKERS[o.i], o.t.x, o.t.y); el._t = { ...o.t }; place(el); });
+    d.f.forEach(o => { const r = regions.find(x => x.id === o.r); if (r) fillRegion(r, STICKERS[o.i]); });
+  }
+  function showUndo(text) {
+    clearTimeout(showUndo.t);
+    undoText.textContent = text;
+    undoBar.classList.add('on');
+    showUndo.t = setTimeout(() => undoBar.classList.remove('on'), 6000);
+  }
+  function record(before, label) {
+    if (before === snapshot()) return;              // nothing actually changed (e.g. a tray shape was only picked up)
+    history.push({ before, label });
+    if (history.length > 50) history.shift();
+    showUndo(label);
+  }
+  function undo() {
+    const h = history.pop();
+    if (!h) return;
+    restore(h.before);
+    document.getElementById('undo-btn').hidden = !history.length;   // nothing further back to undo
+    showUndo('Undid: ' + h.label.toLowerCase());
+  }
+  document.getElementById('undo-btn').addEventListener('click', undo);
+  const recordAndShowButton = (before, label) => { document.getElementById('undo-btn').hidden = false; record(before, label); };
+
+  let selected = null;
+  function place(el) {
+    const { x, y, r, s } = el._t;
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.transform = `translate(-50%, -50%) rotate(${r}deg) scale(${s})`;
+    el.style.setProperty('--inv', (1 / s).toFixed(3));
+  }
+  function addSticker(st, x, y) {
+    const el = document.createElement('div');
+    el.className = 'sticker';
+    el.style.width = st.w + 'px'; el.style.height = st.h + 'px';
+    el.innerHTML = `<img alt="" src="assets/${st.src}" draggable="false"><span class="h h-del" title="Remove">×</span><span class="h h-turn" title="Turn and resize"></span>`;
+    el._t = { x, y, r: 0, s: 1, w: st.w, h: st.h };
+    el._st = st;
+    place(el);
+    board.appendChild(el);
+    el.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      if (e.target.classList.contains('h-del')) { const before = snapshot(); removeSticker(el); return recordAndShowButton(before, 'Removed ' + named(el._st)); }
+      startDrag(el, e, false, e.target.classList.contains('h-turn'));
+    });
+    return el;
+  }
+  function removeSticker(el) { if (selected === el) select(null); el.remove(); }
+  function select(el) {
+    if (selected) selected.classList.remove('sel');
+    selected = el;
+    if (el) { el.classList.add('sel'); board.appendChild(el); }   // the picked shape comes to the front
+  }
+  function nudge(el, { r = 0, s = 1 }) {
+    el._t.r += r; el._t.s = Math.min(5, Math.max(.25, el._t.s * s)); place(el);
+  }
+  // the board lets clicks through (so snapped colours underneath can be picked up); a click on empty space deselects
+  stage.addEventListener('pointerdown', e => {
+    if (decorating && !e.target.closest('.sticker, #tray, #tools, #name-dialog')) select(null);
+  });
+
+  /* ---------- picked-up shape: the cursor turns into it, and every click on the board places a copy there,
+     as many as you like. Click the shape in the tray again, or press Esc, to go back to the arrow. ---------- */
+  const brushCursor = document.getElementById('deco-cursor');
+  const NOT_BOARD = '#tray, #tools, #ring, #wordmark, #ear, #name-dialog, #gallery, #lightbox';
+  function setBrush(st) {
+    brush = st;
+    body.classList.toggle('brushing', !!st);
+    tray.querySelectorAll('.thumb').forEach(b => b.setAttribute('aria-pressed', String(b._st === st)));
+    if (st) {
+      select(null);
+      brushCursor.src = 'assets/' + st.src;
+      brushCursor.style.width = st.w + 'px'; brushCursor.style.height = st.h + 'px';
+    } else { brushCursor.classList.remove('on'); showPreview(null); }
+  }
+  stage.addEventListener('pointermove', e => {
+    if (!brush) return;
+    const p = toStage(e), onBoard = !e.target.closest(NOT_BOARD) && p.y < TRAY_TOP;
+    brushCursor.classList.toggle('on', onBoard);
+    brushCursor.style.left = p.x + 'px'; brushCursor.style.top = p.y + 'px';
+    if (brush.fill) {                         // an emotion colour still shows which gap it would fill
+      const r = onBoard ? nearRegion(p.x, p.y) : null;
+      showPreview(r, brush.fill);
+      brushCursor.style.opacity = r ? .3 : '';
+    }
+  });
+  stage.addEventListener('pointerleave', () => brushCursor.classList.remove('on'));
+  // runs before anything on the board sees the click, so placing never picks up or selects a shape
+  stage.addEventListener('pointerdown', e => {
+    if (!brush || e.button || e.target.closest(NOT_BOARD)) return;
+    const p = toStage(e);
+    if (p.y >= TRAY_TOP) return;
+    e.preventDefault(); e.stopPropagation();
+    const before = snapshot();
+    const r = brush.fill && nearRegion(p.x, p.y);
+    if (r) { fillRegion(r, brush); showPreview(null); recordAndShowButton(before, 'Filled a gap'); }
+    else {
+      const el = addSticker(brush, p.x, p.y);
+      el.classList.add('placed');
+      el.addEventListener('animationend', () => el.classList.remove('placed'), { once: true });
+      recordAndShowButton(before, 'Placed ' + named(brush));
+    }
+    pluck(NOTES[Math.floor(Math.random() * NOTES.length)]);     // placing shapes plays a little tune
+  }, true);
+
+  /* ---------- emotion colours snap into the gaps the outline divides off ---------- */
+  let regions = [];
+  fetch('assets/v2/deco-regions.json').then(r => r.json()).then(r => { regions = r; }).catch(() => {});
+  const fillList = document.getElementById('fill-list');
+  const preview = document.getElementById('fill-preview');
+  const SNAP = 45;                            // px from a gap's edge at which a colour starts to snap
+  const regionPath = r => 'M' + r.pts.map(p => p.join(' ')).join('L') + 'Z';
+  function inside(r, x, y) {
+    let hit = false;
+    for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) {
+      const [xi, yi] = r.pts[i], [xj, yj] = r.pts[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  }
+  function edgeDist(r, x, y) {
+    let best = Infinity;
+    for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) {
+      const [ax, ay] = r.pts[j], [bx, by] = r.pts[i];
+      const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1;
+      const k = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L));
+      best = Math.min(best, Math.hypot(x - ax - k * dx, y - ay - k * dy));
+    }
+    return best;
+  }
+  function nearRegion(x, y) {
+    let pick = null, best = SNAP;
+    for (const r of regions) {
+      if (inside(r, x, y)) return r;
+      const d = edgeDist(r, x, y);
+      if (d < best) { best = d; pick = r; }
+    }
+    return pick;
+  }
+  function showPreview(r, colour) {
+    if (!r) return preview.classList.remove('on');
+    preview.setAttribute('d', regionPath(r));
+    preview.setAttribute('fill', colour); preview.setAttribute('stroke', colour);
+    preview.setAttribute('stroke-width', '8'); preview.setAttribute('stroke-linejoin', 'round');
+    preview.classList.add('on');
+  }
+  function fillRegion(r, st) {
+    fillList.querySelector(`[data-region="${r.id}"]`)?.remove();      // one colour per gap: the new one wins
+    const f = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    f.setAttribute('class', 'fill');
+    f.setAttribute('d', regionPath(r));
+    f.setAttribute('fill', st.fill); f.setAttribute('stroke', st.fill);
+    f.setAttribute('stroke-width', '8'); f.setAttribute('stroke-linejoin', 'round');
+    f.dataset.region = r.id;
+    f._st = st;
+    // pick a filled gap up again: it turns back into the colour blob under the pointer
+    f.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      const p = toStage(e), before = snapshot();
+      f.remove();
+      startDrag(addSticker(st, p.x, p.y), e, false, false, before);
+    });
+    fillList.appendChild(f);
+  }
+
+  /* one drag routine: move a shape, or (from its green handle) turn and resize it around its centre */
+  function startDrag(el, e, fresh, turning = false, before = snapshot()) {
+    select(el);
+    el.classList.add('dragging');
+    const t = el._t, p0 = toStage(e);
+    const a0 = Math.atan2(p0.y - t.y, p0.x - t.x), d0 = Math.hypot(p0.x - t.x, p0.y - t.y) || 1;
+    const start = { ...t };
+    let moved = 0;
+    const move = ev => {
+      const p = toStage(ev);
+      moved = Math.max(moved, Math.hypot(p.x - p0.x, p.y - p0.y));
+      if (turning) {
+        t.r = start.r + (Math.atan2(p.y - t.y, p.x - t.x) - a0) * 180 / Math.PI;
+        t.s = Math.min(5, Math.max(.25, start.s * Math.hypot(p.x - t.x, p.y - t.y) / d0));
+      } else {
+        t.x = start.x + p.x - p0.x; t.y = start.y + p.y - p0.y;
+        if (el._st.fill) {                    // an emotion colour: look for a gap to settle into
+          snap = nearRegion(t.x, t.y);
+          el.classList.toggle('snapping', !!snap);
+          showPreview(snap, el._st.fill);
+        }
+      }
+      place(el);
+    };
+    let snap = null;
+    const up = () => {
+      removeEventListener('pointermove', move);
+      removeEventListener('pointerup', up);
+      removeEventListener('pointercancel', up);
+      el.classList.remove('dragging');
+      if (turning) return recordAndShowButton(before, 'Turned ' + named(el._st));
+      showPreview(null);
+      if (snap && moved >= 6) { fillRegion(snap, el._st); removeSticker(el); return recordAndShowButton(before, 'Filled a gap'); }
+      if (fresh && moved >= 6) setBrush(null);
+      el.classList.remove('snapping');
+      if (fresh && moved < 6) { removeSticker(el); setBrush(el._st); }   // a click on the tray picks the shape up
+      else if (t.y > TRAY_TOP) { removeSticker(el); return recordAndShowButton(before, 'Removed ' + named(el._st)); }
+      recordAndShowButton(before, (fresh ? 'Placed ' : 'Moved ') + named(el._st));
+    };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', up);
+    addEventListener('pointercancel', up);
+  }
+  document.getElementById('d-clear').addEventListener('click', () => {
+    const before = snapshot();
+    select(null); board.replaceChildren(); fillList.replaceChildren();
+    recordAndShowButton(before, 'Cleared the board');
+  });
+
+  /* ---------- capture: draw the decorated hero onto a canvas ---------- */
+  const loadImg = src => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
+  const byline = (name, time) => (name ? 'Decorated by ' + name : 'My Circle Dance') + ' · ' +
+    new Date(time).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  // the Figma line drawing with its black stroke swapped for white, for night captures
+  const whiteDancers = () => fetch('assets/v2/dancers.svg').then(r => r.text()).then(t =>
+    loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t.replace(/stroke="#010101"/g, 'stroke="#ffffff"'))));
+  async function capture(name) {
+    const K = 2, c = document.createElement('canvas');
+    c.width = W * K; c.height = H * K;
+    const ctx = c.getContext('2d');
+    ctx.scale(K, K);
+    ctx.fillStyle = night ? '#4f4f4f' : '#f4f4f5'; ctx.fillRect(0, 0, W, H);
+    const [grass, dancers] = await Promise.all([loadImg('assets/v2/grass.svg'), night ? whiteDancers() : loadImg('assets/v2/dancers.svg')]);
+    ctx.globalAlpha = night ? .4 : 1;          // the grass sits back at night, as on screen
+    ctx.drawImage(grass, -12, -13, 1552.2, 1032.19);
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.filter = 'blur(2.5px)'; ctx.lineJoin = 'round'; ctx.lineWidth = 8;
+    for (const f of fillList.children) {
+      const path = new Path2D(f.getAttribute('d'));
+      ctx.fillStyle = ctx.strokeStyle = f._st.fill;
+      ctx.fill(path); ctx.stroke(path);
+    }
+    ctx.restore();
+    ctx.drawImage(dancers, 222, 247, 1132, 585);
+    for (const el of board.children) {
+      const t = el._t, img = await loadImg(el.querySelector('img').src);
+      ctx.save();
+      ctx.translate(t.x, t.y); ctx.rotate(t.r * Math.PI / 180); ctx.scale(t.s, t.s);
+      ctx.drawImage(img, -t.w / 2, -t.h / 2, t.w, t.h);
+      ctx.restore();
+    }
+    await document.fonts.load("400 55px 'MuseoModerno'");
+    await document.fonts.load("300 20px 'MuseoModerno'");
+    ctx.fillStyle = night ? '#fff' : '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.font = "400 55px 'MuseoModerno'";
+    ctx.fillText('CIRCLE', 755.5, 37); ctx.fillText('DANCE', 755.5, 92);
+    ctx.textAlign = 'left'; ctx.font = "300 20px 'MuseoModerno'";
+    ctx.fillText(byline(name, Date.now()), 36, 931);
+    return new Promise(ok => c.toBlob(ok, 'image/png'));
+  }
+  const capBtn = document.getElementById('d-capture');
+  const nameDialog = document.getElementById('name-dialog');
+  const nameInput = document.getElementById('d-name');
+  const NAME_KEY = 'circle-dance-name';
+  const cleanName = v => v.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  function askName(on) {
+    nameDialog.classList.toggle('on', on);
+    nameDialog.setAttribute('aria-hidden', String(!on));
+    if (on) {
+      try { nameInput.value = localStorage.getItem(NAME_KEY) || ''; } catch {}
+      setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
+    } else capBtn.focus();
+  }
+  capBtn.addEventListener('click', () => { setBrush(null); select(null); askName(true); });   // put a held shape down first
+  document.getElementById('name-cancel').addEventListener('click', () => askName(false));
+  document.getElementById('name-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = cleanName(nameInput.value);
+    try { localStorage.setItem(NAME_KEY, name); } catch {}
+    askName(false);
+    capBtn.disabled = true; capBtn.textContent = 'capturing…';
+    const flash = document.getElementById('flash');
+    flash.classList.remove('on'); void flash.offsetWidth; flash.classList.add('on');
+    try {
+      const blob = await capture(name);
+      const item = await gallery.add(blob, name);
+      await showGallery(true, item.id);
+    } catch (err) {
+      console.error(err);
+      alert('Sorry, the capture could not be saved. Please try again.');
+    } finally {
+      capBtn.disabled = false; capBtn.textContent = 'capture';
+    }
+  });
+
+  /* ---------- gallery storage: the shared gallery on the site's server (serve.py), or, where the
+     site is hosted without it, this browser's own storage ---------- */
+  const gallery = (() => {
+    let mode = null;                          // 'server' | 'local'
+    const db = () => new Promise((ok, no) => {
+      const r = indexedDB.open('circle-dance-gallery', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id' });
+      r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
+    });
+    const tx = async (how, fn) => {
+      const d = await db();
+      return new Promise((ok, no) => { const t = d.transaction('shots', how); const q = fn(t.objectStore('shots')); t.oncomplete = () => ok(q.result); t.onerror = () => no(t.error); });
+    };
+    const urls = new Map();
+    const OWN_KEY = 'circle-dance-owned';     // { capture id: delete key } for captures this browser uploaded
+    const owned = () => { try { return JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch { return {}; } };
+    const setOwned = (id, token) => {
+      const o = owned();
+      if (token) o[id] = token; else delete o[id];
+      try { localStorage.setItem(OWN_KEY, JSON.stringify(o)); } catch {}
+    };
+    const localUrl = s => { if (!urls.has(s.id)) urls.set(s.id, URL.createObjectURL(s.blob)); return urls.get(s.id); };
+    async function detect() {
+      if (mode) return mode;
+      try { const r = await fetch('api/gallery', { cache: 'no-store' }); mode = r.ok ? 'server' : 'local'; }
+      catch { mode = 'local'; }
+      return mode;
+    }
+    return {
+      async list() {
+        if (await detect() === 'server') {
+          const r = await fetch('api/gallery', { cache: 'no-store' });
+          if (r.ok) return r.json();
+        }
+        const all = await tx('readonly', s => s.getAll());
+        return all.sort((a, b) => b.time - a.time).map(s => ({ id: s.id, time: s.time, name: s.name || '', url: localUrl(s) }));
+      },
+      async add(blob, name) {
+        if (await detect() === 'server') {
+          const r = await fetch('api/gallery', { method: 'POST', body: blob,
+            headers: { 'Content-Type': 'image/png', 'X-Name': encodeURIComponent(name) } });
+          if (r.ok) { const it = await r.json(); setOwned(it.id, it.token); return it; }
+        }
+        const shot = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), name, blob };
+        await tx('readwrite', s => s.put(shot));
+        return { id: shot.id, time: shot.time, name, url: localUrl(shot) };
+      },
+      // On the shared gallery only the browser that uploaded a capture holds its delete key;
+      // in a browser-only gallery everything there is the visitor's own.
+      canDelete(id) { return mode === 'local' || !!owned()[id]; },
+      async remove(id) {
+        if (mode === 'server') {
+          const r = await fetch('api/gallery/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'X-Delete-Token': owned()[id] || '' } });
+          if (!r.ok && r.status !== 404) throw new Error('delete failed: ' + r.status);
+          setOwned(id, null);
+          return;
+        }
+        await tx('readwrite', s => s.delete(id));
+        if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+      },
+      get mode() { return mode; },
+    };
+  })();
+
+  const gal = document.getElementById('gallery');
+  const grid = document.getElementById('g-grid');
+  const lightbox = document.getElementById('lightbox');
+  async function showGallery(on, highlight) {
+    if (on && brush) setBrush(null);            // a held shape is put down before the gallery opens
+    body.classList.toggle('gallery-open', on);
+    gal.setAttribute('aria-hidden', String(!on));
+    if (!on) return;
+    let items = [];
+    try { items = await gallery.list(); } catch (err) { console.error(err); }
+    document.getElementById('g-count').textContent =
+      (items.length === 1 ? '1 Circle Dance' : items.length + ' Circle Dances') +
+      (gallery.mode === 'local' ? ' · saved in this browser' : '');
+    grid.replaceChildren();
+    if (!items.length) grid.innerHTML = '<p class="g-empty">Nothing here yet.<br>Decorate the dancers and press capture.</p>';
+    for (const it of items) {
+      const card = document.createElement('figure');
+      card.className = 'g-card';
+      const b = document.createElement('button');
+      b.className = 'g-item' + (it.id === highlight ? ' new' : '');
+      b.setAttribute('aria-label', 'Open capture by ' + (it.name || 'someone') + ', ' + new Date(it.time).toLocaleString());
+      const img = document.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.src = it.url;
+      b.appendChild(img);
+      b.addEventListener('click', () => openShot(it));
+      const cap = document.createElement('figcaption');
+      cap.textContent = it.name || 'anonymous';      // textContent: names are shown as plain text, never as HTML
+      if (gallery.canDelete(it.id) && gallery.mode === 'server') cap.insertAdjacentHTML('beforeend', ' <span class="mine">· yours</span>');
+      card.append(b, cap);
+      grid.appendChild(card);
+    }
+    grid.scrollTop = 0;
+  }
+  const delBtn = document.getElementById('lb-delete');
+  let shown = null;
+  function openShot(it) {
+    shown = it;
+    document.getElementById('lb-img').src = it.url;
+    document.getElementById('lb-save').href = it.url;
+    document.getElementById('lb-save').download = 'circle-dance' + (it.name ? '-' + it.name.replace(/[^\p{L}\p{N}]+/gu, '-') : '') + '.png';
+    document.getElementById('lb-meta').textContent = byline(it.name, it.time);
+    delBtn.hidden = !gallery.canDelete(it.id);
+    disarm();
+    lightbox.classList.add('on'); lightbox.setAttribute('aria-hidden', 'false');
+  }
+  function closeShot() { lightbox.classList.remove('on'); lightbox.setAttribute('aria-hidden', 'true'); shown = null; disarm(); }
+  // delete asks twice: the first click arms the button, a second click within a few seconds deletes
+  function disarm() { clearTimeout(disarm.t); delBtn.classList.remove('arm'); delBtn.textContent = 'delete'; }
+  delBtn.addEventListener('click', async () => {
+    if (!shown) return;
+    if (!delBtn.classList.contains('arm')) {
+      delBtn.classList.add('arm'); delBtn.textContent = 'click again to delete';
+      disarm.t = setTimeout(disarm, 4000);
+      return;
+    }
+    const id = shown.id;
+    delBtn.disabled = true;
+    try {
+      await gallery.remove(id);
+      closeShot();
+      await showGallery(true);
+    } catch (err) {
+      console.error(err);
+      alert('Sorry, this capture could not be deleted.');
+    } finally { delBtn.disabled = false; }
+  });
+  document.getElementById('d-gallery').addEventListener('click', () => showGallery(true));
+  document.getElementById('g-close').addEventListener('click', () => showGallery(false));
+  document.getElementById('g-decorate').addEventListener('click', () => { showGallery(false); if (!decorating) toggle('decorate'); });
+  document.getElementById('lb-close').addEventListener('click', closeShot);
+
+})();
+</script>
+</body>
+</html>

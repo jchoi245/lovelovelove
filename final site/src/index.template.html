@@ -1,0 +1,1525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle Dance</title>
+<meta name="description" content="Circle Dance brings people together — an interactive look at how visitors move around, touch, and gather at Tom Friedman's sculpture.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Enriqueta:wght@600&family=MuseoModerno:wght@300;400&family=Epunda+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Lemonada:wght@600;700&family=Lexend+Mega:wght@200;300&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.11"></script>
+<style>
+  :root {
+    --cream: #f4f4f5;
+    --ink: #111;
+    --leaf: #a1c78d;
+    --t: 700ms;
+    color-scheme: light;
+  }
+  html, body { margin: 0; height: 100%; background: var(--cream); overflow: clip; }
+  body { font-family: 'Epunda Sans', system-ui, sans-serif; color: var(--ink); }
+
+  /* The design is a single 1512×982 artboard; JS scales it to fit the window. */
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1512px; height: 982px;
+    transform-origin: center center;
+    background: var(--cream);
+  }
+
+  /* ---------- state layers ---------- */
+  .layer { position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none;
+           transition: opacity var(--t) ease, visibility 0s linear var(--t); }
+  .layer > * { pointer-events: auto; }
+  .layer.passive > * { pointer-events: none; }
+  /* several layers can be on at once — each ring circle adds an on-<name> class to body */
+  body.on-history  .layer[data-for~="history"],
+  body.on-emotion  .layer[data-for~="emotion"],
+  body.on-duration .layer[data-for~="duration"],
+  body.on-movement .layer[data-for~="movement"],
+  body.on-group    .layer[data-for~="group"],
+  body.on-touch    .layer[data-for~="touch"] {
+    opacity: 1; visibility: visible; transition: opacity var(--t) ease, visibility 0s;
+  }
+
+  /* only the most recently opened layer shows its heading */
+  .layer .title, .layer .subtitle { opacity: 0; transition: opacity 500ms ease; }
+  body[data-top="history"]  .layer[data-for~="history"]  :is(.title, .subtitle),
+  body[data-top="emotion"]  .layer[data-for~="emotion"]  :is(.title, .subtitle),
+  body[data-top="duration"] .layer[data-for~="duration"] :is(.title, .subtitle),
+  body[data-top="movement"] .layer[data-for~="movement"] :is(.title, .subtitle),
+  body[data-top="group"]    .layer[data-for~="group"]    :is(.title, .subtitle),
+  body[data-top="touch"]    .layer[data-for~="touch"]    :is(.title, .subtitle) { opacity: 1; }
+
+  /* each layer's heading now lives in the shared caption (bottom left) and ring label, not on the layer */
+  .layer .title, .layer .subtitle { display: none; }
+
+
+  /* ---------- 6 · physical touch ---------- */
+  .tring { position: absolute; transform-origin: center; animation: flash 3.2s ease-in-out infinite; }
+  .tring img { width: 100%; height: 100%; display: block; }
+  @keyframes flash {
+    0%, 100% { opacity: .15; transform: scale(.55); }
+    35%      { opacity: 1;   transform: scale(1); }
+    70%      { opacity: .55; transform: scale(.9); }
+  }
+  .spot { position: absolute; border-radius: 50%; cursor: default; }
+  .spot-label { position: absolute; width: 98px; text-align: center; font-weight: 500; font-size: 14px;
+                line-height: 1.28; letter-spacing: -0.308px; opacity: 0; transform: translateY(-4px);
+                transition: opacity 250ms, transform 250ms; pointer-events: none; }
+  .spot:hover + .spot-label, .spot:focus-visible + .spot-label { opacity: 1; transform: none; }
+
+  /* ---------- 2 · emotion ---------- */
+  /* ---------- parallax (as on wildflowers.garden): the scene drifts against the mouse in layers ----------
+     Each layer has its own depth and its own speed (set in the script), and holds its offset in --lx / --ly.
+     The grass, dancers, legends, titles and History stay put; a legend undoes its layer's drift. */
+  .layer:not(#history), .mv-shoe, .emo-sheet { --lx: 0px; --ly: 0px; translate: var(--lx) var(--ly); }
+  .mv-shoe { position: absolute; inset: 0; }            /* one sheet per shoe type, so each trail drifts on its own */
+  .layer:not(#history) .legend { translate: calc(var(--lx) * -1) calc(var(--ly) * -1); }
+  body.parallax-rest :is(.layer, .mv-shoe, .emo-sheet) { translate: none !important; }   /* while measuring the frame edges */
+
+  /* ---------- day / night ---------- */
+  /* night (Figma 26:6158): dark grey ground under the same green grass, black line and type */
+  html, body, #stage { transition: background-color 700ms ease; }
+  html.night, html.night body, body.night #stage { background: #4f4f4f; }
+  /* at night the black type and line work turns white (panels with their own light background keep black) */
+  body.night { --ink: #fff; }
+  #wordmark, #caption, #ring-label, #daynight-label, .slide-head, .layer .legend, .spot-label { transition: color 700ms ease; }
+  body.night :is(#wordmark, #caption, #ring-label, #daynight-label, .slide-head) { color: #fff; }
+  /* History's pre-blurred background follows the night ground and the white line */
+  .hist-backdrop, .hist-backdrop .hb-art img[src$="dancers.svg"] { transition: background-color 700ms ease, filter 700ms ease; }
+  body.night .hist-backdrop { background: #4f4f4f; }
+  body.night .hist-backdrop .hb-art img[src$="dancers.svg"] { filter: invert(1); }
+  #ring svg circle, #daynight svg, #dancers-svg path { transition: stroke 700ms ease; }
+  body.night #ring svg circle, body.night #daynight svg, body.night #dancers-svg path { stroke: #fff; }
+  #ear img, .icon-btn img { transition: filter 700ms ease; }
+  body.night #ear img, body.night .icon-btn img { filter: invert(1) brightness(2); }
+  /* the grass sits back at night (also in the History blur and in captures) */
+  #grass, .hist-backdrop .hb-art img[src$="grass.svg"] { transition: opacity 700ms ease; }
+  body.night #grass, body.night .hist-backdrop .hb-art img[src$="grass.svg"] { opacity: .4; }
+  .layer .n, .layer .night-only { display: none; }
+  body.night .layer .d { display: none; }
+  body.night .layer .n { display: inline; }
+  body.night .layer .night-only { display: block; }
+  body.night .layer .legend-card .tx.night-only { display: flex; }
+  /* a legend shows only the rows for the current mode (its own layout rules would otherwise show both) */
+  body:not(.night) .legend-card .night-only, body.night .legend-card .day-only { display: none; }
+  body.night .layer .day-only { display: none; }
+  #mv .mv-night { display: none; }
+  body.night #mv .mv-day { display: none; }
+  body.night #mv .mv-night { display: block; }
+  .emo-night { display: none; }
+  body.night .emo-day { display: none; }
+  body.night .emo-night { display: block; }
+  /* duration has a day set and a night set of eyes (Figma 57:13400 / 57:15925) */
+  .dur-night { display: none; }
+  body.night .dur-day { display: none; }
+  body.night .dur-night { display: block; }
+  /* night group size: fewer people pass alone or in big groups; pairs and small groups remain */
+  body.night .grp:has(img[src$="grp_F5.svg"]), body.night .grp:has(img[src$="grp_F10.svg"]),
+  body.night .grp:has(img[src$="grp_F8.svg"]), body.night .grp:has(img[src$="grp_F9.svg"]) { display: none; }
+  /* what's on: one chip per open view (newest at the bottom); clicking a chip turns that view off again */
+  #showing { position: absolute; right: 36px; top: 112px; z-index: 12; display: flex; flex-direction: column; align-items: flex-end;
+             gap: 6px; transition: opacity 300ms; }
+  #showing .lbl { font: 300 13px/1 'MuseoModerno', sans-serif; color: #000; margin-bottom: 2px; transition: color 700ms ease; }
+  body.night #showing .lbl { color: #fff; }
+  #showing .chip { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 14px; border: 1px solid #000; border-radius: 999px;
+                   background: rgba(255,255,255,.85); color: #000; font: 300 15px/1 'MuseoModerno', sans-serif; cursor: pointer;
+                   animation: chip-in 250ms ease-out; transition: background 200ms; }
+  #showing .chip:hover { background: #fff; }
+  #showing .chip .x { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--leaf); font-size: 13px; }
+  #showing .chip.all { background: none; border-style: dashed; padding-right: 14px; }
+  body.night #showing .chip.all { color: #fff; border-color: #fff; }
+  #showing .chip:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 2px; }
+  @keyframes chip-in { from { opacity: 0; transform: translateX(10px); } }
+  body:is(.decorating, .gallery-open) #showing { opacity: 0; pointer-events: none; }
+  /* the switch: a thin-line moon by day (go to night), a sun by night (go to day) */
+  #daynight { position: absolute; left: 1446px; top: 48px; width: 34px; height: 34px; z-index: 12; padding: 0; border: 0;
+              background: none; cursor: pointer; transition: transform 350ms cubic-bezier(.3,1.6,.5,1), opacity 300ms; }
+  #daynight:hover { transform: rotate(-15deg) scale(1.12); }
+  #daynight:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 4px; border-radius: 50%; }
+  #daynight svg { width: 100%; height: 100%; overflow: visible; }
+  #daynight .sun { display: none; }
+  body.night #daynight .sun { display: inline; }
+  body.night #daynight .moon { display: none; }
+  #daynight-label { position: absolute; left: 1463px; top: 92px; transform: translateX(-50%); margin: 0; z-index: 12;
+                    font: 300 15px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0; transition: opacity 200ms; pointer-events: none; }
+  #daynight:hover + #daynight-label, #daynight:focus-visible + #daynight-label { opacity: 1; }
+  body:is(.decorating, .gallery-open) :is(#daynight, #daynight-label) { opacity: 0; pointer-events: none; }
+  .emo-sheet { position: absolute; inset: 0; }
+  .emo-icon { position: absolute; transform-origin: 50% 50%; }
+  .emo-icon img { display: block; width: 100%; height: 100%; }
+
+  /* ---------- 4 · movement ---------- */
+  #mv { overflow: hidden; }   /* prints run off the edges of the frame, as in Figma */
+
+  /* ---------- legends: the most recently opened view shows its legend (bottom right, above the ear) ---------- */
+  .layer .legend { opacity: 0; pointer-events: none; transition: opacity 500ms ease; }
+  .layer .legend.on { opacity: 1; }
+
+  /* ---------- 5 · group size ---------- */
+  .dur-eye img { position: absolute; max-width: none; }
+  /* every legend is the same card: bottom right above the ear, a soft white ground, a fixed-width
+     column of shapes (each centred in its cell) and the labels lined up beside them */
+  .legend-card { position: absolute; right: 36px; bottom: 96px; display: grid; grid-template-columns: 48px auto;
+                 column-gap: 14px; row-gap: 8px; align-items: center; padding: 14px 20px 14px 14px; border-radius: 16px;
+                 background: rgba(255,255,255,.55); transition: background-color 700ms ease;
+                 font-weight: 500; font-size: 14px; line-height: 1.28; letter-spacing: -0.308px; white-space: nowrap; }
+  body.night .legend-card { background: rgba(255,255,255,.12); }
+  .legend-card .sw { width: 48px; height: 30px; display: grid; place-items: center; }
+  .legend-card .sw img { max-width: 48px; max-height: 30px; width: auto; height: auto; object-fit: contain; }
+  .legend-card .tx { display: flex; gap: 10px; align-items: baseline; }
+  .legend-card .val { opacity: .7; }
+  .spin { animation: spin 48s linear infinite; animation-play-state: paused; transform-origin: center; }
+  .spin.ccw { animation-direction: reverse; }
+  body.on-group .spin { animation-play-state: running; }   /* groups appear all at once and turn straight away */
+  @keyframes spin { to { rotate: 360deg; } }
+
+  /* ---------- 1 · history ---------- */
+  #hist-circle { position: absolute; left: 397px; top: 194px; width: 711px; height: 711px; border-radius: 50%;
+                 transform: scale(.6); opacity: 0; transition: transform 700ms cubic-bezier(.3,1.4,.5,1), opacity 400ms; }
+  body.on-history #hist-circle { transform: none; opacity: 1; }
+  /* The blurred background is a pre-blurred copy of the grass and sculpture held inside the circle, not a live
+     backdrop-filter: browsers skip backdrop blur while the circle animates, which made it pop in late. */
+  .hist-backdrop { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; background: var(--cream); }
+  .hist-backdrop .hb-art { position: absolute; left: -397px; top: -194px; width: 1512px; height: 982px; filter: blur(22px); }
+  .hist-backdrop .hb-art img { position: absolute; max-width: none; }
+  /* a soft, see-through white over the blurred scene (a little lighter touch at night, so the white text still reads) */
+  .hist-backdrop::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.4); transition: background-color 700ms ease; }
+  body.night .hist-backdrop::after { background: rgba(255,255,255,.12); }
+  /* the History layer itself never fades: a backdrop blur doesn't render while a parent is semi-transparent,
+     so fading the layer made the blur pop in late. The circle and heading do their own fading instead. */
+  .layer#history { opacity: 1; transition: visibility 0s linear 700ms; }
+  body.on-history .layer#history { transition: visibility 0s; }
+  .slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity 450ms ease, visibility 0s linear 450ms; }
+  .slide.on { opacity: 1; visibility: visible; transition: opacity 450ms ease 150ms, visibility 0s; }
+  /* while History is closed nothing inside it may catch the mouse (the slides and arrows set their own visibility) */
+  body:not(.on-history) #hist-circle > :not(.hist-backdrop), body:not(.on-history) #hist-circle > :not(.hist-backdrop) * { visibility: hidden !important; }
+  .slide-body { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .slide-head { margin: 0 0 30px; font-family: 'Epunda Sans', sans-serif; font-weight: 600; font-size: 23px; line-height: normal; color: #000; }
+  .slide-head .amp { font-family: 'Enriqueta', serif; font-weight: 600; }
+  .slide-text { margin: 0; max-width: 430px; font-size: 23px; line-height: 1.46; letter-spacing: -0.506px; }
+  .caption { position: absolute; text-align: center; font-size: 17px; line-height: 1.5; letter-spacing: -0.374px; margin: 0; }
+  .icon-btn { position: absolute; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer;
+              border-radius: 50%; transition: transform 200ms; }
+  .icon-btn img { width: 100%; height: 100%; display: block; }
+  .icon-btn:hover { transform: scale(1.25); }
+  .icon-btn:focus-visible { outline: 2px dashed #a58be0; outline-offset: 3px; }
+
+  /* ---------- wordmark, ring nav, label, caption ---------- */
+  #wordmark { position: absolute; left: 755.5px; top: 37px; width: 307px; transform: translateX(-50%); margin: 0; padding: 0;
+              border: 0; background: none; cursor: pointer; color: #000; text-align: center;
+              font: 400 55px/1 'MuseoModerno', sans-serif; }
+  #wordmark:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 6px; border-radius: 8px; }
+  #ring { position: absolute; left: 35px; top: 37px; width: 94.88px; height: 94.88px; }
+  #ring svg { position: absolute; inset: 0; overflow: visible; }
+  #ring svg circle { fill: transparent; transition: fill 250ms ease; }
+  #ring svg circle.hot, #ring svg circle.on { fill: var(--leaf); }
+  #ring svg circle.hot.on { fill: #7fae68; }
+  .dot { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; padding: 0; border: 0; border-radius: 50%;
+         background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .dot:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 2px; }
+  /* like the flower site's petal titles: one spot beside the ring, the word tilts to match the circle */
+  #ring-label { position: absolute; left: 206.36px; top: 90.19px; margin: 0; white-space: nowrap; pointer-events: none;
+                font: 300 17px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0;
+                transform: translate(-50%, -50%) rotate(var(--r, 0deg)); transform-origin: 50% 50%;
+                transition: opacity 200ms ease, transform 350ms cubic-bezier(.3,1.4,.5,1); }
+  #ring-label.on { opacity: 1; }
+  #caption { position: absolute; left: 36px; top: 931px; margin: 0; white-space: nowrap; color: #000;
+             font: 300 20px/1 'MuseoModerno', sans-serif; transition: opacity 300ms ease; }
+  #caption.swap { opacity: 0; }
+  /* the ring, title, caption and ear stay above the decorating board */
+  #ring, #wordmark, #caption, #ear, #ring-label { z-index: 12; }
+  #ring svg circle[data-c="0"] { stroke-width: 1.2; }
+  .dot.big { width: 32px; height: 32px; margin: -16px 0 0 -16px; }
+
+  /* ---------- decorate your own Circle Dance ---------- */
+  .deco-ui { position: absolute; opacity: 0; visibility: hidden; transition: opacity 400ms ease, visibility 0s linear 400ms; }
+  body.decorating .deco-ui { opacity: 1; visibility: visible; transition: opacity 400ms ease, visibility 0s; }
+  #board { inset: 0; z-index: 5; pointer-events: none; }
+  #board .sticker { pointer-events: auto; }
+  .sticker { transition: opacity 200ms ease; }
+  .sticker.snapping { opacity: .3; }
+  /* emotion colours that have snapped into the gaps of the outline (they sit under the line) */
+  #deco-fills { position: absolute; left: 0; top: 0; width: 1512px; height: 982px; overflow: visible; pointer-events: none; }
+  #deco-fills .fill { pointer-events: auto; cursor: grab; transform-box: fill-box; transform-origin: center;
+                      animation: fill-in 650ms cubic-bezier(.3,1.35,.5,1); }
+  #deco-fills .fill.out { animation: none; transition: opacity 180ms ease; opacity: 0; }
+  #fill-preview { opacity: 0; transition: opacity 220ms ease; pointer-events: none; }
+  #fill-preview.on { opacity: .55; }
+  @keyframes fill-in { from { opacity: .2; transform: scale(.6); } to { opacity: 1; transform: none; } }
+  .sticker { position: absolute; transform-origin: 50% 50%; cursor: grab; touch-action: none; user-select: none; }
+  .sticker img { display: block; width: 100%; height: 100%; pointer-events: none; -webkit-user-drag: none; }
+  .sticker.dragging { cursor: grabbing; }
+  .sticker .h { position: absolute; width: 18px; height: 18px; border-radius: 50%; border: 1px solid #000; background: #fff;
+                display: none; place-items: center; font: 300 13px/1 'MuseoModerno', sans-serif; scale: var(--inv, 1); }
+  .sticker.sel { outline: 1px dashed #000; outline-offset: 4px; }
+  .sticker.sel .h { display: grid; }
+  .sticker .h-turn { right: -13px; bottom: -13px; cursor: nwse-resize; background: var(--leaf); }
+  .sticker .h-del { right: -13px; top: -13px; cursor: pointer; }
+  #tray { left: 50%; top: 842px; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px;
+          padding: 6px 18px; border: 1px solid #000; border-radius: 40px; background: rgba(255,255,255,.72); }
+  #tray .sep { width: 1px; height: 36px; background: rgba(0,0,0,.25); margin: 0 6px; }
+  .thumb { width: 50px; height: 50px; padding: 4px; border: 0; background: none; cursor: grab; touch-action: none;
+           border-radius: 50%; transition: transform 300ms cubic-bezier(.3,1.6,.5,1); }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+  .thumb:hover, .thumb:focus-visible { transform: scale(1.15); }
+  .thumb:focus-visible { outline: 2px dashed var(--leaf); }
+  .thumb[aria-pressed="true"] { background: var(--leaf); transform: scale(1.15); }
+  /* a picked shape follows the pointer in place of the arrow; each click on the board places a copy */
+  #deco-cursor { position: absolute; z-index: 13; pointer-events: none; max-width: none; opacity: 0; transform: translate(-50%, -50%);
+                 transition: opacity 150ms ease; }
+  body.brushing #deco-cursor.on { opacity: .75; }
+  body.brushing #stage, body.brushing .sticker, body.brushing #deco-fills .fill { cursor: none; }
+  /* dialogs and panels always keep the normal cursor, even while a shape is held */
+  body.brushing :is(#name-dialog, #gallery, #lightbox, #tray, #tools, #undo-bar) { cursor: auto; }
+  .sticker.placed { animation: place-in 360ms cubic-bezier(.2,1.5,.5,1); }
+  @keyframes place-in { 0% { opacity: 0; scale: 1.35; } 60% { opacity: 1; scale: .95; } 100% { scale: 1; } }
+  #tools { right: 36px; top: 46px; z-index: 11; display: flex; gap: 10px; }
+  .pill { padding: 7px 18px; border: 1px solid #000; border-radius: 999px; background: rgba(255,255,255,.72); color: #000;
+          font: 300 17px/1 'MuseoModerno', sans-serif; cursor: pointer; transition: background 200ms; }
+  .pill:hover { background: #fff; }
+  .pill.go { background: var(--leaf); }
+  .pill.go:hover { background: #8fbd78; }
+  .pill:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 3px; }
+  .pill[disabled] { opacity: .5; cursor: progress; }
+  /* undo: says what the last change was, with a way back */
+  #undo-bar { left: 756px; top: 788px; transform: translate(-50%, 8px); z-index: 11; display: flex; align-items: center; gap: 12px;
+              padding: 6px 8px 6px 18px; border: 1px solid #000; border-radius: 999px; background: rgba(255,255,255,.85);
+              font: 300 16px/1 'MuseoModerno', sans-serif; color: #000; white-space: nowrap;
+              transition: opacity 300ms ease, transform 300ms ease, visibility 0s linear 300ms; }
+  body.decorating #undo-bar:not(.on) { opacity: 0; visibility: hidden; }
+  body.decorating #undo-bar.on { transform: translate(-50%, 0); transition: opacity 300ms ease, transform 300ms ease, visibility 0s; }
+  #undo-bar button { padding: 5px 14px; font-size: 15px; }
+  #flash { position: absolute; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; }
+  #flash.on { animation: flash-shot 700ms ease-out; }
+  @keyframes flash-shot { from { opacity: .9; } to { opacity: 0; } }
+
+  /* ---------- gallery ---------- */
+  #gallery { position: absolute; inset: 0; z-index: 20; background: rgba(244,244,245,.96); opacity: 0; visibility: hidden;
+             transition: opacity 400ms ease, visibility 0s linear 400ms; }
+  body.gallery-open #gallery { opacity: 1; visibility: visible; transition: opacity 400ms ease, visibility 0s; }
+  #gallery h2 { position: absolute; left: 120px; top: 168px; margin: 0; font: 400 34px/1 'MuseoModerno', sans-serif; color: #000; }
+  #gallery .count { position: absolute; left: 120px; top: 212px; margin: 0; font: 300 17px/1 'MuseoModerno', sans-serif; }
+  #gallery .g-tools { position: absolute; right: 120px; top: 170px; display: flex; gap: 10px; }
+  #g-grid { position: absolute; left: 120px; right: 108px; top: 252px; bottom: 60px; overflow-y: auto; padding: 4px 12px 24px 4px;
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; align-content: start; }
+  .g-card { margin: 0; }
+  .g-card figcaption { margin-top: 8px; font: 300 15px/1.3 'MuseoModerno', sans-serif; color: #000;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g-card figcaption .mine { color: #5d8f45; }
+  .g-item { width: 100%; padding: 0; border: 1px solid #000; border-radius: 12px; overflow: hidden; background: #f4f4f5; cursor: zoom-in;
+            aspect-ratio: 1512 / 982; transition: transform 300ms cubic-bezier(.3,1.4,.5,1); }
+  .g-item img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .g-item:hover { transform: scale(1.03); }
+  .g-item.new { animation: g-new 1.4s ease-out; }
+  @keyframes g-new { from { box-shadow: 0 0 0 10px var(--leaf); } to { box-shadow: 0 0 0 0 transparent; } }
+  .g-empty { grid-column: 1 / -1; margin: 80px 0 0; text-align: center; font: 300 20px/1.5 'MuseoModerno', sans-serif; }
+  #lightbox { position: absolute; inset: 0; z-index: 25; display: grid; place-items: center; background: rgba(244,244,245,.97);
+              opacity: 0; visibility: hidden; transition: opacity 300ms, visibility 0s linear 300ms; }
+  #lightbox.on { opacity: 1; visibility: visible; transition: opacity 300ms, visibility 0s; }
+  #lightbox img { width: 1060px; border: 1px solid #000; border-radius: 14px; display: block; }
+  #lightbox .lb-tools { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  #lightbox a.pill { text-decoration: none; }
+  #lb-meta { margin: 14px 0 0; text-align: center; font: 300 18px/1 'MuseoModerno', sans-serif; color: #000; }
+  .pill.danger:hover { background: #f6d7d2; }
+  .pill.danger.arm { background: #e9897a; }
+  /* name before uploading */
+  #name-dialog { position: absolute; inset: 0; z-index: 26; display: grid; place-items: center; background: rgba(244,244,245,.8);
+                 opacity: 0; visibility: hidden; transition: opacity 250ms, visibility 0s linear 250ms; }
+  #name-dialog.on { opacity: 1; visibility: visible; transition: opacity 250ms, visibility 0s; }
+  #name-dialog form { width: 460px; padding: 32px 36px 28px; border: 1px solid #000; border-radius: 22px; background: #fff; text-align: center; }
+  #name-dialog label { display: block; margin-bottom: 16px; font: 400 26px/1.2 'MuseoModerno', sans-serif; color: #000; }
+  #name-dialog input { width: 100%; box-sizing: border-box; padding: 10px 18px; border: 1px solid #000; border-radius: 999px; background: #f4f4f5;
+                       font: 300 20px/1.2 'MuseoModerno', sans-serif; color: #000; text-align: center; outline: none; }
+  #name-dialog input:focus { box-shadow: 0 0 0 3px var(--leaf); }
+  #name-dialog .hint { margin: 10px 0 20px; font: 300 14px/1.3 'MuseoModerno', sans-serif; color: #555; }
+  #name-dialog .row { display: flex; gap: 10px; justify-content: center; }
+
+  /* ear button: sound waves ripple out while the ambience plays */
+  #ear { padding: 0; border: 0; background: none; cursor: pointer; transition: transform 300ms cubic-bezier(.3,1.6,.5,1); }
+  #ear:hover { transform: scale(1.12); }
+  #ear:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 6px; border-radius: 8px; }
+  #ear::before, #ear::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+                              border-radius: 50%; border: 1.5px solid var(--leaf); opacity: 0; pointer-events: none; }
+  #ear[aria-pressed="true"]::before { animation: ear-wave 2.4s ease-out infinite; }
+  #ear[aria-pressed="true"]::after  { animation: ear-wave 2.4s ease-out 1.2s infinite; }
+  @keyframes ear-wave { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.9); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tring, .spin { animation: none !important; }
+    #ring-label { transition: opacity 200ms ease; }
+  }
+</style>
+</head>
+<body class="none-on" data-top="home">
+<div id="stage">
+
+  <!-- title: clicking it closes every open view (back to the start screen) -->
+  <button id="wordmark" aria-label="Circle Dance — back to start">CIRCLE<br>DANCE</button>
+
+  <!-- the ring of six circles is the menu: each one opens one of the six views; the bigger centre circle
+       opens "decorate your own Circle Dance" (the title goes home) -->
+  <nav id="ring" aria-label="Views">
+    <svg viewBox="0 0 94.88 94.88" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle data-c="1" cx="8.64" cy="47.44" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="2" cx="28.04" cy="13.84" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="3" cx="66.84" cy="13.84" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="4" cx="86.24" cy="47.44" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="5" cx="66.84" cy="81.04" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="6" cx="28.04" cy="81.04" r="8.19" stroke="#010101" stroke-miterlimit="10"/>
+      <circle data-c="0" cx="47.44" cy="47.44" r="14" stroke="#010101" stroke-miterlimit="10"/>
+    </svg>
+    <button class="dot big" data-go="decorate" data-c="0" style="left:47.44px;top:47.44px" aria-label="Decorate your own Circle Dance" aria-pressed="false"></button>
+    <button class="dot" data-go="history" data-c="1" style="left:8.64px;top:47.44px" aria-label="History" aria-pressed="false"></button>
+    <button class="dot" data-go="emotion" data-c="2" style="left:28.04px;top:13.84px" aria-label="Emotion" aria-pressed="false"></button>
+    <button class="dot" data-go="duration" data-c="3" style="left:66.84px;top:13.84px" aria-label="Duration" aria-pressed="false"></button>
+    <button class="dot" data-go="movement" data-c="4" style="left:86.24px;top:47.44px" aria-label="Movement" aria-pressed="false"></button>
+    <button class="dot" data-go="group" data-c="5" style="left:66.84px;top:81.04px" aria-label="Group size" aria-pressed="false"></button>
+    <button class="dot" data-go="touch" data-c="6" style="left:28.04px;top:81.04px" aria-label="Physical touch" aria-pressed="false"></button>
+  </nav>
+  <p id="ring-label" aria-hidden="true"></p>
+
+  <p id="caption" aria-live="polite">Circle Dance Brings People Together</p>
+
+  <!-- day / night: the data views switch between what was recorded by day and by night -->
+  <button id="daynight" aria-label="Show the night data" aria-pressed="false">
+    <svg viewBox="0 0 34 34" fill="none" stroke="#010101" stroke-width="1.2" stroke-linecap="round" aria-hidden="true">
+      <path class="moon" d="M22.5 5.2a12 12 0 1 0 6.3 15.6A10 10 0 0 1 22.5 5.2z"/>
+      <g class="sun"><circle cx="17" cy="17" r="6.5"/>
+        <path d="M17 3.5v3.5M17 27v3.5M3.5 17H7M27 17h3.5M7.5 7.5l2.4 2.4M24.1 24.1l2.4 2.4M7.5 26.5l2.4-2.4M24.1 9.9l2.4-2.4"/></g>
+    </svg>
+  </button>
+  <p id="daynight-label" aria-hidden="true">night</p>
+
+  <!-- the views that are on right now; click one to turn it off -->
+  <div id="showing" aria-label="Views that are on" aria-live="polite"></div>
+
+  <!-- ear: plays the night-time ambience (crickets + people talking) -->
+  <button id="ear" class="absolute h-[47px] left-[1448.4px] top-[904px] w-[29px]" aria-label="Play ambient sound" aria-pressed="false" title="Listen">
+    <div class="absolute inset-[-4.26%_-6.9%]"><img alt="" class="block max-w-none size-full" src="assets/v2/ear.svg"></div>
+  </button>
+
+  <!-- grass -->
+  <img id="grass" alt="" class="absolute h-[1032.19px] left-[-12px] top-[-13px] w-[1552.2px] max-w-none pointer-events-none" src="assets/v2/grass.svg">
+
+  <!-- ===== under-sculpture data ===== -->
+
+
+  <!-- 2 · emotion: mood icons (Figma 84:3) scattered across the screen, one sheet per mood -->
+  <div class="layer passive" data-for="emotion">
+{{EMO_ICONS}}
+  </div>
+
+  <!-- decorate: emotion colours dropped into the gaps of the outline fill them, under the line -->
+  <svg id="deco-fills" class="deco-ui" viewBox="0 0 1512 982" aria-hidden="true">
+    <defs><filter id="fill-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.5"/></filter></defs>
+    <g filter="url(#fill-soft)"><path id="fill-preview"/><g id="fill-list"></g></g>
+  </svg>
+
+  <!-- the dancers (line drawing of the sculpture), exactly as exported from Figma node 5:2 -->
+  <div id="dancers" class="absolute h-[585px] left-[222px] top-[247px] w-[1132px] pointer-events-none">
+{{DANCERS}}
+  </div>
+
+  <!-- 4 · movement: shoe prints placed exactly as in Figma 26:129, on top of the dancers' line -->
+  <div class="layer passive" data-for="movement" id="mv">
+{{MV_FOOT}}
+  </div>
+
+  <!-- ===== over-sculpture data ===== -->
+
+  <!-- 6 · physical touch -->
+  <div class="layer" data-for="touch">
+    <!-- hand: three stacked rings (most touched) -->
+    <div class="tring left-[443px] top-[503px] w-[114px] h-[114px]" style="animation-delay:0s"><img alt="" src="assets/touch_e104.svg"></div>
+    <div class="tring left-[449px] top-[509px] w-[101px] h-[101px]" style="animation-delay:.25s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[457px] top-[517px] w-[85px] h-[85px]" style="animation-delay:.5s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- head: two rings -->
+    <div class="tring day-only left-[759.5px] top-[217.5px] w-[101px] h-[101px]" style="animation-delay:.9s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[767.5px] top-[225.5px] w-[85px] h-[85px]" style="animation-delay:1.15s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- torso / other: single rings -->
+    <div class="tring left-[597.5px] top-[612.5px] w-[85px] h-[85px]" style="animation-delay:1.6s"><img alt="" src="assets/touch_e103.svg"></div>
+    <div class="tring left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" style="animation-delay:2.1s"><img alt="" src="assets/touch_e103.svg"></div>
+
+    <div class="spot left-[443px] top-[503px] w-[114px] h-[114px]" tabindex="0" aria-label="Hand" data-day="42%" data-night="51%"></div>
+    <p class="spot-label left-[450px] top-[617px] m-0">Hand<br><span class="d">42%</span><span class="n">51%</span></p>
+    <div class="spot left-[759.5px] top-[217.5px] w-[101px] h-[101px]" tabindex="0" aria-label="Head" data-day="28%" data-night="17%"></div>
+    <p class="spot-label left-[759.5px] top-[321.5px] m-0">Head<br><span class="d">28%</span><span class="n">17%</span></p>
+    <div class="spot left-[597.5px] top-[612.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Torso" data-day="18%" data-night="22%"></div>
+    <p class="spot-label left-[588.5px] top-[697.5px] m-0">Torso<br><span class="d">18%</span><span class="n">22%</span></p>
+    <div class="spot left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Other" data-day="12%" data-night="10%"></div>
+    <p class="spot-label left-[1006.5px] top-[734.5px] m-0">Other<br><span class="d">12%</span><span class="n">10%</span></p>
+
+    <!-- legend (shown while this is the most recent view) -->
+    <div class="legend absolute inset-0" id="legend-touch">
+      <div class="legend-card" role="img" aria-label="Legend: the bigger the glow, the more often people touched there">
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:30px"></span><span class="tx">80–100%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:25px"></span><span class="tx">60–80%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:20px"></span><span class="tx">40–60%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:15px"></span><span class="tx">20–40%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:10px"></span><span class="tx">0–20%</span>
+      </div>
+    </div>
+    <h2 class="title">Physical Touch</h2>
+    <p class="subtitle">Where people touched the sculpture</p>
+  </div>
+
+  <!-- 3 · duration -->
+  <div class="layer passive" data-for="duration">
+    <!-- eyes placed exactly as in Figma (day 57:13400, night 57:15925); the wider the eye, the longer people looked -->
+{{DUR_EYES}}
+    <div class="legend absolute inset-0" id="legend-duration">
+      <div class="legend-card" role="img" aria-label="Legend: the wider the eye, the longer people looked">
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-s.svg"></span><span class="tx">5 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-m.svg"></span><span class="tx">15 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-l.svg"></span><span class="tx">25 min</span>
+        <span class="sw"><img alt="" src="assets/v2/eyes/eye-xl.svg"></span><span class="tx">+ 25 min</span>
+      </div>
+    </div>
+    <h2 class="title">Duration</h2>
+    <p class="subtitle">How long do people look at or stay near the sculpture</p>
+  </div>
+
+  <!-- 5 · group size -->
+  <div class="layer passive" data-for="group">
+    <!-- People 1 (single visitors) -->
+    <div class="grp absolute h-[89.737px] left-[1087px] top-[175px] w-[90.077px]" style="--i:0">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F5.svg">
+    </div>
+    <div class="grp absolute flex h-[127.119px] items-center justify-center left-[1413.67px] top-[562.63px] w-[127.128px]" style="--i:0">
+      <div class="flex-none rotate-[43.88deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F13.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[107.13px] items-center justify-center left-[111.8px] top-[193.62px] w-[106.87px]" style="--i:0">
+      <div class="flex-none rotate-[77.7deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F10.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[126.717px] items-center justify-center left-[509.06px] top-[492.21px] w-[126.756px]" style="--i:0">
+      <div class="flex-none rotate-[40.39deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F7.svg">
+      </div></div>
+    </div>
+    <!-- People 2 (pairs) -->
+    <div class="grp absolute h-[135px] left-[1257px] top-[40px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F3.svg">
+    </div>
+    <div class="grp absolute h-[135px] left-[912px] top-[874px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F3.svg">
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[369.74px] top-[-62.12px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F11.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[66px] top-[358px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F11.svg">
+      </div></div>
+    </div>
+    <!-- People 3 -->
+    <div class="grp absolute h-[139px] left-[409px] top-[797px] w-[145px]" style="--i:2">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F4.svg">
+    </div>
+    <!-- People 4 -->
+    <div class="grp absolute h-[137px] left-[269px] top-[142px] w-[133px]" style="--i:3">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F14.svg">
+    </div>
+    <div class="grp absolute left-[912px] top-[639px] w-[133px] h-[139px]" style="--i:3">
+      <div class="spin ccw absolute inset-0">
+        <img alt="" class="absolute max-w-none left-[92px] top-[37px] w-[21px] h-[23px]" src="assets/grp_v0.svg">
+        <img alt="" class="absolute max-w-none left-[74px] top-[13px] w-[59px] h-[61px]" src="assets/grp_v1.svg">
+        <img alt="" class="absolute max-w-none left-[31px] top-[25px] w-[23px] h-[21px]" src="assets/grp_v2.svg">
+        <img alt="" class="absolute max-w-none left-[6px] top-[0px] w-[63px] h-[62px]" src="assets/grp_v3.svg">
+        <img alt="" class="absolute max-w-none left-[23px] top-[80px] w-[22px] h-[22px]" src="assets/grp_v4.svg">
+        <img alt="" class="absolute max-w-none left-[0px] top-[66px] w-[62px] h-[62px]" src="assets/grp_v5.svg">
+        <img alt="" class="absolute max-w-none left-[77px] top-[94px] w-[23px] h-[22px]" src="assets/grp_v6.svg">
+        <img alt="" class="absolute max-w-none left-[63px] top-[77px] w-[62px] h-[60px]" src="assets/grp_v7.svg">
+      </div>
+    </div>
+    <!-- People 5 -->
+    <div class="grp absolute h-[158px] left-[43px] top-[629px] w-[165px]" style="--i:4">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F9.svg">
+    </div>
+    <!-- People 6 -->
+    <div class="grp absolute h-[182px] left-[868px] top-[380px] w-[188px]" style="--i:5">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F8.svg">
+    </div>
+
+    <!-- legend: one shape per group size, in the same colour as the groups (lavender by day, green at night) -->
+    <div class="legend absolute inset-0" id="legend-group">
+      <div class="legend-card" role="img" aria-label="Legend: groups of one to six people">
+        <span class="sw"><img alt="" src="assets/grp_F5.svg"></span><span class="tx">1 person</span>
+        <span class="sw"><img alt="" src="assets/grp_F3.svg"></span><span class="tx">2 people</span>
+        <span class="sw"><img alt="" src="assets/grp_F4.svg"></span><span class="tx">3 people</span>
+        <span class="sw"><img alt="" src="assets/grp_F14.svg"></span><span class="tx">4 people</span>
+        <span class="sw"><img alt="" src="assets/grp_F9.svg"></span><span class="tx">5 people</span>
+        <span class="sw"><img alt="" src="assets/grp_F8.svg"></span><span class="tx">6 people</span>
+      </div>
+    </div>
+    <h2 class="title">Group Size</h2>
+    <p class="subtitle">Whether people pass by alone, in pairs, or in groups</p>
+  </div>
+
+  <!-- 2 · emotion legend + title -->
+  <div class="layer passive" data-for="emotion">
+    <div class="legend absolute inset-0" id="legend-emotion">
+      <div class="legend-card" role="img" aria-label="Legend: the moods people showed and their share">
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/calm.svg"></span><span class="tx day-only">Calm <span class="val">~35%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/excited.svg"></span><span class="tx day-only">Excited <span class="val">~25%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/energetic.svg"></span><span class="tx day-only">Energetic <span class="val">~20%</span></span>
+        <span class="sw day-only"><img alt="" src="assets/v2/emo-icons/curiosity.svg"></span><span class="tx day-only">Curiosity <span class="val">~20%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/tired.svg"></span><span class="tx night-only">Tired <span class="val">~35%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/energetic-night.svg"></span><span class="tx night-only">Energetic <span class="val">~25%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/curiosity-night.svg"></span><span class="tx night-only">Curiosity <span class="val">~25%</span></span>
+        <span class="sw night-only"><img alt="" src="assets/v2/emo-icons/angry.svg"></span><span class="tx night-only">Angry <span class="val">~15%</span></span>
+      </div>
+    </div>
+    <h2 class="title">Emotion/Facial Expression</h2>
+    <p class="subtitle">How people felt around the sculpture</p>
+  </div>
+
+  <!-- 4 · movement title (shown in the caption) -->
+  <div class="layer" data-for="movement">
+    <h2 class="title">Movement</h2>
+    <p class="subtitle">People’s Walking Path Around The Sculpture And The Surrounding</p>
+  </div>
+
+  <!-- decorate your own Circle Dance: drag the infographic shapes onto the dancers, then capture -->
+  <div id="board" class="deco-ui" aria-label="Decorating board"></div>
+  <div id="tray" class="deco-ui" role="toolbar" aria-label="Shapes — drag onto the dancers, or click to add"></div>
+  <div id="tools" class="deco-ui">
+    <button class="pill" id="d-clear">clear</button>
+    <button class="pill" id="d-gallery">gallery</button>
+    <button class="pill go" id="d-capture">capture</button>
+  </div>
+  <div id="undo-bar" class="deco-ui" role="status" aria-live="polite">
+    <span id="undo-text"></span>
+    <button class="pill" id="undo-btn" type="button">undo</button>
+  </div>
+  <div id="flash"></div>
+  <img id="deco-cursor" alt="" aria-hidden="true">
+
+  <!-- gallery: everything people have captured -->
+  <section id="gallery" aria-label="Gallery" aria-hidden="true">
+    <h2>gallery</h2>
+    <p class="count" id="g-count"></p>
+    <div class="g-tools">
+      <button class="pill go" id="g-decorate">decorate your own</button>
+      <button class="pill" id="g-close">close</button>
+    </div>
+    <div id="g-grid"></div>
+  </section>
+  <div id="name-dialog" role="dialog" aria-modal="true" aria-labelledby="name-label" aria-hidden="true">
+    <form id="name-form" autocomplete="off">
+      <label id="name-label" for="d-name">Who decorated this?</label>
+      <input id="d-name" name="name" maxlength="40" placeholder="your name" spellcheck="false">
+      <p class="hint">Your name appears with your Circle Dance in the gallery.</p>
+      <div class="row">
+        <button class="pill go" type="submit">upload to gallery</button>
+        <button class="pill" type="button" id="name-cancel">cancel</button>
+      </div>
+    </form>
+  </div>
+  <div id="lightbox" role="dialog" aria-label="Capture" aria-hidden="true">
+    <div>
+      <img id="lb-img" alt="A decorated Circle Dance">
+      <p id="lb-meta"></p>
+      <div class="lb-tools">
+        <a class="pill" id="lb-save" download="circle-dance.png">save image</a>
+        <button class="pill danger" id="lb-delete" hidden>delete</button>
+        <button class="pill" id="lb-close">close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 · history -->
+  <div class="layer" data-for="history" id="history">
+    <div id="hist-circle" role="dialog" aria-modal="false" aria-label="History of Circle Dance">
+      <div class="hist-backdrop" aria-hidden="true"><div class="hb-art">
+        <img alt="" src="assets/v2/grass.svg" style="left:-12px;top:-13px;width:1552.2px;height:1032.19px">
+        <img alt="" src="assets/v2/dancers.svg" style="left:222px;top:247px;width:1132px;height:585px">
+      </div></div>
+      <!-- coordinates inside the circle are artboard coords minus (397,194) -->
+      <div class="slide on" data-n="0">
+        <div class="slide-body">
+          <h3 class="slide-head">THE SCULPTURE</h3>
+          <p class="slide-text">Created in 2010, Circle Dance consists of eleven life-size figures holding hands in a circle. Installed at Brown University in 2012, the sculpture brings a sense of movement and energy to the campus.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="1">
+        <div class="slide-body">
+          <h3 class="slide-head">THE INSPIRATION</h3>
+          <p class="slide-text" style="max-width:420px">Inspired by Henri Matisse’s La Danse (1910), the sculpture echoes the painting’s circular arrangement of dancing figures. Their linked hands can be interpreted as symbols of unity, movement, and shared experience.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="2">
+        <div class="slide-body">
+          <h3 class="slide-head">THE ARTIST <span class="amp">&amp;</span> MATERIAL</h3>
+          <p class="slide-text" style="max-width:399px;font-size:25px;line-height:1.5;letter-spacing:-0.55px">Tom Friedman is a conceptual sculptor known for transforming everyday materials. He originally modeled Circle Dance using aluminum roasting pans, preserving their impressions in the final stainless-steel sculpture.</p>
+        </div>
+      </div>
+
+      <button class="icon-btn" id="hist-prev" aria-label="Previous" style="left:22px;top:334px"><img alt="" src="assets/icon_chevron.svg" style="transform:rotate(180deg)"></button>
+      <button class="icon-btn" id="hist-next" aria-label="Next" style="left:672px;top:334px"><img alt="" src="assets/icon_chevron.svg"></button>
+      <button class="icon-btn" id="hist-close" aria-label="Close" style="left:339px;top:667px;width:33px;height:34px"><img alt="" src="assets/icon_x.svg"></button>
+    </div>
+    <h2 class="title">History</h2>
+    <p class="subtitle">Historical Information About Circle Dance</p>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const W = 1512, H = 982;
+  const stage = document.getElementById('stage');
+  let scale = 1;
+  function fit() {
+    scale = Math.min(innerWidth / W, innerHeight / H);
+    stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  /* ---------- button sounds: a soft, woody kalimba "tok" on a pentatonic scale (generated, no audio file;
+     the same sound as the other Circle Dance site) ---------- */
+  const NOTES = [523.25, 587.33, 659.25, 783.99, 880];   // C5 D5 E5 G5 A5
+  let sfx;
+  function pluck(freq) {
+    sfx = sfx || new (window.AudioContext || window.webkitAudioContext)();
+    sfx.resume();
+    const t = sfx.currentTime, out = sfx.createGain(), lp = sfx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2200;
+    out.gain.setValueAtTime(0, t);
+    out.gain.linearRampToValueAtTime(.14, t + .006);
+    out.gain.exponentialRampToValueAtTime(.0001, t + .55);
+    lp.connect(out).connect(sfx.destination);
+    // fundamental + a quiet bell-like overtone that fades faster
+    [[freq, 1, .55], [freq * 2.76, .18, .18]].forEach(([f, amp, len]) => {
+      const o = sfx.createOscillator(), g = sfx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(amp, t); g.gain.exponentialRampToValueAtTime(.0001, t + len);
+      o.connect(g).connect(lp); o.start(t); o.stop(t + len + .05);
+    });
+  }
+  // each kind of control gets its own note, so the site plays like one quiet instrument
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    const i = b.classList.contains('dot') ? (b.dataset.go === 'decorate' ? 2 : (+b.dataset.c - 1) % 5)   // ring: a note per view
+            : b.id === 'daynight' ? (night ? 4 : 0)                // runs before the switch flips: brighter going to day
+            : b.classList.contains('thumb') ? 3
+            : 2;
+    pluck(NOTES[i]);
+  }, true);
+
+  /* ear: the night-time crickets at night, people talking by day (both loop; the one for the other mode
+     sits silent so switching day/night can crossfade); click again to stop */
+  const ambience = ['assets/crickets.m4a', 'assets/people-talking.m4a'].map(src => {
+    const a = new Audio(src); a.loop = true; a.preload = 'auto'; a.volume = 0; return a;
+  });
+  const AMBIENT_VOL = [0.7, 0.55];
+  const levels = () => night ? [AMBIENT_VOL[0], 0] : [0, AMBIENT_VOL[1]];   // [crickets, people talking]
+  const earBtn = document.getElementById('ear');
+  let earOn = false, fadeRaf;
+  function fadeTo(target, ms, done) {
+    cancelAnimationFrame(fadeRaf);
+    const from = ambience.map(a => a.volume), t0 = performance.now();
+    const tick = now => {
+      const k = Math.min(1, Math.max(0, (now - t0) / ms));
+      const to = target ? levels() : [0, 0];
+      ambience.forEach((a, i) => { a.volume = Math.min(1, Math.max(0, from[i] + (to[i] - from[i]) * k)); });
+      if (k < 1) fadeRaf = requestAnimationFrame(tick); else if (done) done();
+    };
+    fadeRaf = requestAnimationFrame(tick);
+  }
+  function setEar(on) {
+    if (on === earOn) return;
+    earOn = on;
+    earBtn.setAttribute('aria-pressed', String(earOn));
+    earBtn.setAttribute('aria-label', earOn ? 'Stop ambient sound' : 'Play ambient sound');
+    if (earOn) { ambience.forEach(a => a.play().catch(() => {})); fadeTo(true, 1200); }
+    else fadeTo(false, 800, () => ambience.forEach(a => a.pause()));
+  }
+  earBtn.addEventListener('click', () => setEar(!earOn));
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- day / night: every data view has a day set and a night set; the switch flips them all ---------- */
+  let night = false;
+  const dnBtn = document.getElementById('daynight'), dnLabel = document.getElementById('daynight-label');
+  function setNight(on) {
+    night = on;
+    body.classList.toggle('night', on);
+    document.documentElement.classList.toggle('night', on);
+    dnBtn.setAttribute('aria-pressed', String(on));
+    dnBtn.setAttribute('aria-label', on ? 'Show the day data' : 'Show the night data');
+    dnLabel.textContent = on ? 'day' : 'night';
+    document.querySelectorAll('.spot[data-day]').forEach(el => {
+      el.setAttribute('aria-label', el.getAttribute('aria-label').split(' ')[0] + ' ' + (on ? el.dataset.night : el.dataset.day));
+    });
+    // group size: lavender shapes by day, the original green at night
+    document.querySelectorAll('.layer[data-for="group"] img[src*="grp_"]').forEach(img => {
+      const name = img.getAttribute('src').split('/').pop();
+      img.setAttribute('src', (on ? 'assets/' : 'assets/v2/group/') + name);
+    });
+    if (typeof render === 'function') render();
+    keepInside();                                                     // the other set may have shapes at the edge
+    if (earOn) fadeTo(true, 1500);                                    // crossfade to the other mode's sound
+  }
+  dnBtn.addEventListener('click', () => setNight(!night));
+
+  const body = document.body;
+  const dots = [...document.querySelectorAll('.dot[data-go]')];
+  const views = dots.filter(d => d.dataset.go !== 'decorate');
+
+  /* Data layers stack: each ring circle turns its own infographic on or off, so several can be
+     layered at once. History is a pop-up on top of whatever is showing. The caption, ring label
+     and legend follow the most recently opened layer. */
+  const NAMES = { home: 'Circle Dance', history: 'history', emotion: 'emotion', duration: 'duration',
+                  movement: 'movement', group: 'group size', touch: 'physical touch', decorate: 'decorate' };
+  const CAPTIONS = {
+    home: 'Circle Dance Brings People Together',
+    history: 'Historical information about Circle Dance',
+    emotion: 'How people felt around the sculpture',
+    duration: 'How long people look at or stay near the sculpture',
+    movement: 'People’s walking path around the sculpture’s site',
+    group: 'Whether people pass by alone, in pairs, or in groups',
+    touch: 'Where people touched the sculpture',
+    decorate: 'Decorate your own Circle Dance: pick a shape, then click to place it',
+  };
+  const LEGENDS = ['emotion', 'duration', 'group', 'touch'];   // Movement has no legend in the new design
+  const circle = n => document.querySelector(`#ring svg circle[data-c="${n}"]`);
+
+  /* ring label: one spot beside the ring (as in the Figma frame); the word tilts to follow the
+     circle it belongs to, so it swings round as you move along the ring */
+  const label = document.getElementById('ring-label');
+  const RING_C = 47.44, TILT = 48.14;     // ring centre; Movement (due east) tilts 48°, as in Figma
+  function tilt(dot) {
+    if (dot.dataset.go === 'decorate') return 0;   // the centre circle has no direction
+    const a = Math.atan2(parseFloat(dot.style.top) - RING_C, parseFloat(dot.style.left) - RING_C) * 180 / Math.PI + TILT;
+    return ((a + 90) % 180 + 180) % 180 - 90;  // keep the word readable (never upside down)
+  }
+  let hovered = null;
+  function showLabel() {
+    const top = body.dataset.top;
+    const dot = hovered || dots.find(d => d.dataset.go === top);
+    label.classList.toggle('on', !!dot);
+    if (!dot) return;
+    label.textContent = NAMES[dot.dataset.go];
+    label.style.setProperty('--r', tilt(dot).toFixed(2) + 'deg');
+  }
+
+  const caption = document.getElementById('caption');
+  const NIGHT_VIEWS = ['emotion', 'duration', 'movement', 'group', 'touch'];
+  function setCaption(key) {
+    const text = CAPTIONS[key] + (night && NIGHT_VIEWS.includes(key) ? ', at night' : '');
+    if (caption.textContent === text) return;
+    caption.classList.add('swap');
+    clearTimeout(setCaption.t);
+    setCaption.t = setTimeout(() => { caption.textContent = text; caption.classList.remove('swap'); }, 300);
+  }
+
+  const active = [];                      // open data layers, oldest first
+  let historyOpen = false;
+  function render() {
+    for (const b of views) {
+      const n = b.dataset.go;
+      const on = n === 'history' ? historyOpen : active.includes(n);
+      body.classList.toggle('on-' + n, on);
+      b.setAttribute('aria-pressed', String(on));
+      circle(b.dataset.c).classList.toggle('on', on);
+    }
+    body.classList.toggle('none-on', !active.length && !historyOpen && !decorating);
+    body.classList.toggle('decorating', decorating);
+    if (!decorating && brush) setBrush(null);
+    circle(0).classList.toggle('on', decorating);
+    document.querySelector('.dot[data-go="decorate"]').setAttribute('aria-pressed', String(decorating));
+    const top = decorating ? 'decorate' : historyOpen ? 'history' : (active[active.length - 1] || 'home');
+    body.dataset.top = top;
+    if (LEGENDS.includes(top)) legend(top, true); else LEGENDS.forEach(n => legend(n, false));
+    setCaption(top);
+    showLabel();
+    showOpen();
+  }
+  const showing = document.getElementById('showing');
+  function showOpen() {
+    const open = [...active, ...(historyOpen ? ['history'] : [])];
+    showing.replaceChildren();
+    if (!open.length) return;
+    showing.insertAdjacentHTML('beforeend', '<span class="lbl">showing</span>');
+    for (const n of open) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.setAttribute('aria-label', `Turn off ${NAMES[n]}`);
+      b.innerHTML = `<span></span><span class="x" aria-hidden="true">×</span>`;
+      b.firstChild.textContent = NAMES[n] + (night && NIGHT_VIEWS.includes(n) ? ' · night' : '');
+      b.addEventListener('click', () => toggle(n));
+      showing.appendChild(b);
+    }
+    if (open.length > 1) {
+      const all = document.createElement('button');
+      all.className = 'chip all';
+      all.textContent = 'clear all';
+      all.addEventListener('click', clearAll);
+      showing.appendChild(all);
+    }
+  }
+  let decorating = false;
+  let brush = null;                       // the tray shape picked up as the cursor, if any
+  function toggle(n) {
+    if (n === 'decorate') { if (!decorating) clearAll(); decorating = !decorating; if (!decorating) select(null); return render(); }
+    if (decorating) { decorating = false; select(null); }   // opening a view leaves the decorating board
+    if (n === 'history') { historyOpen = !historyOpen; if (historyOpen) show(0); return render(); }
+    const i = active.indexOf(n);
+    if (i >= 0) { active.splice(i, 1); leave(n); } else active.push(n);
+    render();
+  }
+  function clearAll() {
+    historyOpen = false;
+    decorating = false;
+    if (typeof select === 'function') select(null);
+    while (active.length) leave(active.pop());
+    render();
+  }
+  dots.forEach(d => {
+    d.addEventListener('click', () => toggle(d.dataset.go));
+    const hot = on => { hovered = on ? d : null; circle(d.dataset.c).classList.toggle('hot', on); showLabel(); };
+    d.addEventListener('pointerenter', () => hot(true));
+    d.addEventListener('pointerleave', () => hot(false));
+    d.addEventListener('focus', () => hot(true));
+    d.addEventListener('blur', () => hot(false));
+  });
+  // the title goes back to the start screen
+  document.getElementById('wordmark').addEventListener('click', clearAll);
+  addEventListener('keydown', e => {
+    if (decorating && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !e.target.closest?.('input, textarea')) {
+      e.preventDefault(); return undo();
+    }
+    if (e.key === 'Escape') {
+      if (nameDialog.classList.contains('on')) return askName(false);
+      if (lightbox.classList.contains('on')) return closeShot();
+      if (body.classList.contains('gallery-open')) return showGallery(false);
+      if (brush) return setBrush(null);
+      if (decorating && selected) return select(null);
+      if (historyOpen) toggle('history'); else clearAll();
+    }
+    if (decorating && selected && !e.target.closest?.('input, textarea, form')) {
+      const before = snapshot(), what = named(selected._st);
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSticker(selected); recordAndShowButton(before, 'Removed ' + what); }
+      if (e.key === '[' || e.key === ']') { nudge(selected, { r: e.key === ']' ? 10 : -10 }); recordAndShowButton(before, 'Turned ' + what); }
+      if (e.key === '+' || e.key === '=' || e.key === '-') { nudge(selected, { s: e.key === '-' ? 1 / 1.1 : 1.1 }); recordAndShowButton(before, 'Resized ' + what); }
+    }
+    if (historyOpen) {
+      if (e.key === 'ArrowRight') go(1);
+      if (e.key === 'ArrowLeft') go(-1);
+    }
+  });
+
+  function leave(s) { legend(s, false); }
+
+  /* ---------- history slides ---------- */
+  const slides = [...document.querySelectorAll('.slide')];
+  let cur = 0;
+  function show(n) {
+    cur = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((el, i) => el.classList.toggle('on', i === cur));
+    document.getElementById('hist-prev').style.visibility = cur === 0 ? 'hidden' : 'visible';
+    document.getElementById('hist-next').style.visibility = cur === slides.length - 1 ? 'hidden' : 'visible';
+  }
+  const go = d => show(cur + d);
+  document.getElementById('hist-prev').addEventListener('click', () => go(-1));
+  document.getElementById('hist-next').addEventListener('click', () => go(1));
+  document.getElementById('hist-close').addEventListener('click', () => toggle('history'));
+
+  /* ---------- parallax: as the mouse moves (pressed or not) every layer drifts the opposite way, all in the
+     same direction but each by its own amount and at its own speed: the curiosity icons barely moving and
+     slow to follow; the groups right at the front, swinging furthest and catching up fastest. So the layers
+     peel apart while the mouse moves and settle back together when it stops. While decorating or in the
+     gallery everything settles back to centre. ---------- */
+  (() => {
+    const SWING_X = 110, SWING_Y = 72;        // a depth-1 layer's full swing, edge to edge (px)
+    const LAYERS = [                          // depth (how far) and pace (how quickly it catches up, per frame)
+      // the moods: each kind of icon is its own sheet, so they drift past one another
+      { sel: '.emo-sheet[data-emo="curiosity"]', depth: .5,  pace: .04 },
+      { sel: '.emo-sheet[data-emo="calm"]',      depth: .9,  pace: .05 },
+      { sel: '.emo-sheet[data-emo="tired"]',     depth: 1.1, pace: .055 },
+      { sel: '.emo-sheet[data-emo="energetic"]', depth: 1.5, pace: .075 },
+      { sel: '.emo-sheet[data-emo="excited"]',   depth: 2.1, pace: .1 },
+      { sel: '.emo-sheet[data-emo="angry"]',     depth: 2.5, pace: .12 },
+      { sel: '.layer[data-for="touch"]',    depth: 1.1, pace: .065 },
+      { sel: '.layer[data-for="duration"]', depth: 1.7, pace: .08 },
+      // the footprints: each shoe type is its own sheet, so the trails slide past one another
+      { sel: '.mv-shoe[data-shoe="heels"]',   depth: 1.4, pace: .06 },
+      { sel: '.mv-shoe[data-shoe="dress"]',   depth: 2,   pace: .085 },
+      { sel: '.mv-shoe[data-shoe="sneaker"]', depth: 2.6, pace: .11 },
+      { sel: '.mv-shoe[data-shoe="boot"]',    depth: 3.3, pace: .14 },
+      { sel: '.layer[data-for="group"]',    depth: 3,   pace: .12 },
+    ].map(l => ({ ...l, els: [...document.querySelectorAll(l.sel)], x: 0, y: 0 }));
+    let mx = 0, my = 0;
+    const aim = e => { mx = e.clientX / innerWidth - .5; my = e.clientY / innerHeight - .5; };
+    addEventListener('pointerdown', aim);
+    addEventListener('pointermove', aim);
+    document.addEventListener('pointerleave', () => { mx = my = 0; });   // the mouse left the page: drift home
+    const still = () => reduce || body.classList.contains('decorating') || body.classList.contains('gallery-open');
+    function frame() {
+      const tx = still() ? 0 : -mx * SWING_X, ty = still() ? 0 : -my * SWING_Y;
+      for (const l of LAYERS) {
+        const gx = tx * l.depth, gy = ty * l.depth;
+        if (Math.abs(gx - l.x) < .02 && Math.abs(gy - l.y) < .02) continue;
+        l.x += (gx - l.x) * l.pace; l.y += (gy - l.y) * l.pace;
+        for (const el of l.els) { el.style.setProperty('--lx', l.x.toFixed(2) + 'px'); el.style.setProperty('--ly', l.y.toFixed(2) + 'px'); }
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+  /* ---------- keep every data shape whole: anything that pokes past the edge of the frame is slid inward
+     just far enough to sit fully inside it (shapes that spin get room for their whole turn) ---------- */
+  const EDGE = 12;                              // px kept clear between a shape and the frame's edge
+  function keepInside() {
+    // measure with the parallax at rest, so a passing mouse offset doesn't skew the check
+    body.classList.add('parallax-rest');
+    try { measureInside(); } finally { body.classList.remove('parallax-rest'); }
+  }
+  function measureInside() {
+    const sr = stage.getBoundingClientRect();
+    const shapes = [
+      ...document.querySelectorAll('#mv .fp-step'),
+      ...document.querySelectorAll('.grp'),
+      ...document.querySelectorAll('.dur-eye'),
+      ...document.querySelectorAll('.emo-icon'),
+    ];
+    for (const el of new Set(shapes)) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;      // not on show (the other day/night set)
+      const [ox, oy] = (el.dataset.inside || '0 0').split(' ').map(Number);
+      let x0 = (r.left - sr.left) / scale - ox, y0 = (r.top - sr.top) / scale - oy;
+      let x1 = x0 + r.width / scale, y1 = y0 + r.height / scale;
+      if (el.classList.contains('grp')) {       // a spinning group sweeps a circle around its centre
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rad = Math.hypot(x1 - x0, y1 - y0) / 2;
+        x0 = cx - rad; x1 = cx + rad; y0 = cy - rad; y1 = cy + rad;
+      }
+      const dx = x0 < EDGE ? EDGE - x0 : x1 > W - EDGE ? W - EDGE - x1 : 0;
+      const dy = y0 < EDGE ? EDGE - y0 : y1 > H - EDGE ? H - EDGE - y1 : 0;
+      el.dataset.inside = `${dx} ${dy}`;
+      el.style.translate = dx || dy ? `${dx.toFixed(1)}px ${dy.toFixed(1)}px` : '';
+    }
+  }
+  keepInside();
+
+
+  /* ---------- legends: they share the bottom-right corner, so only the newest view's is shown ---------- */
+  function legend(name, on) {
+    const el = document.getElementById('legend-' + name);
+    if (!el) return;                          // Movement and History have no legend
+    el.classList.toggle('on', on);
+    if (on) LEGENDS.filter(n => n !== name).forEach(n => legend(n, false));
+  }
+
+  /* ---------- decorate your own Circle Dance ---------- */
+  const STICKERS = [   // the shapes from the infographics, at a comfortable starting size (artboard px)
+    { g: 'touch',    src: 'touch_e104.svg', w: 114, h: 114 },
+    { g: 'touch',    src: 'touch_e103.svg', w: 85,  h: 85 },
+    { g: 'duration', src: 'v2/eyes/eye-xl.svg', w: 90, h: 81 },
+    { g: 'duration', src: 'v2/eyes/eye-l.svg',  w: 90, h: 66 },
+    { g: 'duration', src: 'v2/eyes/eye-m.svg',  w: 90, h: 34 },
+    { g: 'duration', src: 'v2/eyes/eye-s.svg',  w: 90, h: 21 },
+    { g: 'emotion',  src: 'v2/emo-icons/calm.svg',      w: 106, h: 99 },
+    { g: 'emotion',  src: 'v2/emo-icons/excited.svg',   w: 102, h: 95 },
+    { g: 'emotion',  src: 'v2/emo-icons/energetic.svg', w: 101, h: 86 },
+    { g: 'emotion',  src: 'v2/emo-icons/curiosity.svg', w: 76,  h: 143 },
+    { g: 'emotion',  src: 'v2/emo-icons/tired.svg',     w: 146, h: 90 },
+    { g: 'emotion',  src: 'v2/emo-icons/angry.svg',     w: 100, h: 113 },
+    { g: 'group',    src: 'grp_F5.svg',  w: 90,  h: 90 },
+    { g: 'group',    src: 'grp_F3.svg',  w: 109, h: 135 },
+    { g: 'group',    src: 'grp_F4.svg',  w: 145, h: 139 },
+    { g: 'group',    src: 'grp_F14.svg', w: 133, h: 137 },
+    { g: 'group',    src: 'grp_F9.svg',  w: 165, h: 158 },
+    { g: 'group',    src: 'grp_F8.svg',  w: 188, h: 182 },
+    { g: 'movement', src: 'v2/feet/heels-pair.svg',   w: 58, h: 61 },
+    { g: 'movement', src: 'v2/feet/boot-pair.svg',    w: 60, h: 63 },
+    { g: 'movement', src: 'v2/feet/sneaker-pair.svg', w: 60, h: 60 },
+    { g: 'movement', src: 'v2/feet/dress-pair.svg',   w: 59, h: 60 },
+  ];
+  const GROUP_NAMES = { touch: 'touch ring', duration: 'eye', emotion: 'mood', group: 'group', movement: 'pair of footprints' };
+  const board = document.getElementById('board');
+  const tray = document.getElementById('tray');
+  const TRAY_TOP = 836;                       // dropping a shape back on the tray removes it
+  const toStage = e => {
+    const r = stage.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  };
+
+  STICKERS.forEach((st, i) => {
+    if (i && STICKERS[i - 1].g !== st.g) tray.insertAdjacentHTML('beforeend', '<span class="sep" aria-hidden="true"></span>');
+    const b = document.createElement('button');
+    b.className = 'thumb';
+    b.setAttribute('aria-label', 'Add ' + GROUP_NAMES[st.g]);
+    b.innerHTML = `<img alt="" src="assets/${st.src}" draggable="false">`;
+    b._st = st;
+    b.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      if (brush === st) return setBrush(null);            // clicking the picked shape again puts it down
+      const p = toStage(e), before = snapshot();
+      startDrag(addSticker(st, p.x, p.y), e, true, false, before);   // drag it straight out, or (a plain click) pick it up
+    });
+    b.addEventListener('keydown', e => {      // keyboard: Enter / Space drops the shape in the middle
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      const before = snapshot();
+      select(addSticker(st, 756 + (Math.random() - .5) * 240, 520 + (Math.random() - .5) * 160));
+      recordAndShowButton(before, 'Placed ' + named(st));
+    });
+    tray.appendChild(b);
+  });
+
+  /* ---------- undo: the board is snapshotted before each change; undo puts the last snapshot back ---------- */
+  const history = [];
+  const undoBar = document.getElementById('undo-bar'), undoText = document.getElementById('undo-text');
+  const named = st => { const n = GROUP_NAMES[st.g]; return (/^[aeiou]/.test(n) ? 'an ' : 'a ') + n; };
+  const snapshot = () => JSON.stringify({
+    s: [...board.children].map(el => ({ i: STICKERS.indexOf(el._st), t: el._t })),
+    f: [...fillList.children].map(f => ({ r: f.dataset.region, i: STICKERS.indexOf(f._st) })) });
+  function restore(json) {
+    const d = JSON.parse(json);
+    select(null);
+    board.replaceChildren(); fillList.replaceChildren();
+    d.s.forEach(o => { const el = addSticker(STICKERS[o.i], o.t.x, o.t.y); el._t = { ...o.t }; place(el); });
+    d.f.forEach(o => { const r = regions.find(x => x.id === o.r); if (r) fillRegion(r, STICKERS[o.i]); });
+  }
+  function showUndo(text) {
+    clearTimeout(showUndo.t);
+    undoText.textContent = text;
+    undoBar.classList.add('on');
+    showUndo.t = setTimeout(() => undoBar.classList.remove('on'), 6000);
+  }
+  function record(before, label) {
+    if (before === snapshot()) return;              // nothing actually changed (e.g. a tray shape was only picked up)
+    history.push({ before, label });
+    if (history.length > 50) history.shift();
+    showUndo(label);
+  }
+  function undo() {
+    const h = history.pop();
+    if (!h) return;
+    restore(h.before);
+    document.getElementById('undo-btn').hidden = !history.length;   // nothing further back to undo
+    showUndo('Undid: ' + h.label.toLowerCase());
+  }
+  document.getElementById('undo-btn').addEventListener('click', undo);
+  const recordAndShowButton = (before, label) => { document.getElementById('undo-btn').hidden = false; record(before, label); };
+
+  let selected = null;
+  function place(el) {
+    const { x, y, r, s } = el._t;
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.transform = `translate(-50%, -50%) rotate(${r}deg) scale(${s})`;
+    el.style.setProperty('--inv', (1 / s).toFixed(3));
+  }
+  function addSticker(st, x, y) {
+    const el = document.createElement('div');
+    el.className = 'sticker';
+    el.style.width = st.w + 'px'; el.style.height = st.h + 'px';
+    el.innerHTML = `<img alt="" src="assets/${st.src}" draggable="false"><span class="h h-del" title="Remove">×</span><span class="h h-turn" title="Turn and resize"></span>`;
+    el._t = { x, y, r: 0, s: 1, w: st.w, h: st.h };
+    el._st = st;
+    place(el);
+    board.appendChild(el);
+    el.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      if (e.target.classList.contains('h-del')) { const before = snapshot(); removeSticker(el); return recordAndShowButton(before, 'Removed ' + named(el._st)); }
+      startDrag(el, e, false, e.target.classList.contains('h-turn'));
+    });
+    return el;
+  }
+  function removeSticker(el) { if (selected === el) select(null); el.remove(); }
+  function select(el) {
+    if (selected) selected.classList.remove('sel');
+    selected = el;
+    if (el) { el.classList.add('sel'); board.appendChild(el); }   // the picked shape comes to the front
+  }
+  function nudge(el, { r = 0, s = 1 }) {
+    el._t.r += r; el._t.s = Math.min(5, Math.max(.25, el._t.s * s)); place(el);
+  }
+  // the board lets clicks through (so snapped colours underneath can be picked up); a click on empty space deselects
+  stage.addEventListener('pointerdown', e => {
+    if (decorating && !e.target.closest('.sticker, #tray, #tools, #name-dialog')) select(null);
+  });
+
+  /* ---------- picked-up shape: the cursor turns into it, and every click on the board places a copy there,
+     as many as you like. Click the shape in the tray again, or press Esc, to go back to the arrow. ---------- */
+  const brushCursor = document.getElementById('deco-cursor');
+  const NOT_BOARD = '#tray, #tools, #ring, #wordmark, #ear, #name-dialog, #gallery, #lightbox';
+  function setBrush(st) {
+    brush = st;
+    body.classList.toggle('brushing', !!st);
+    tray.querySelectorAll('.thumb').forEach(b => b.setAttribute('aria-pressed', String(b._st === st)));
+    if (st) {
+      select(null);
+      brushCursor.src = 'assets/' + st.src;
+      brushCursor.style.width = st.w + 'px'; brushCursor.style.height = st.h + 'px';
+    } else { brushCursor.classList.remove('on'); showPreview(null); }
+  }
+  stage.addEventListener('pointermove', e => {
+    if (!brush) return;
+    const p = toStage(e), onBoard = !e.target.closest(NOT_BOARD) && p.y < TRAY_TOP;
+    brushCursor.classList.toggle('on', onBoard);
+    brushCursor.style.left = p.x + 'px'; brushCursor.style.top = p.y + 'px';
+    if (brush.fill) {                         // an emotion colour still shows which gap it would fill
+      const r = onBoard ? nearRegion(p.x, p.y) : null;
+      showPreview(r, brush.fill);
+      brushCursor.style.opacity = r ? .3 : '';
+    }
+  });
+  stage.addEventListener('pointerleave', () => brushCursor.classList.remove('on'));
+  // runs before anything on the board sees the click, so placing never picks up or selects a shape
+  stage.addEventListener('pointerdown', e => {
+    if (!brush || e.button || e.target.closest(NOT_BOARD)) return;
+    const p = toStage(e);
+    if (p.y >= TRAY_TOP) return;
+    e.preventDefault(); e.stopPropagation();
+    const before = snapshot();
+    const r = brush.fill && nearRegion(p.x, p.y);
+    if (r) { fillRegion(r, brush); showPreview(null); recordAndShowButton(before, 'Filled a gap'); }
+    else {
+      const el = addSticker(brush, p.x, p.y);
+      el.classList.add('placed');
+      el.addEventListener('animationend', () => el.classList.remove('placed'), { once: true });
+      recordAndShowButton(before, 'Placed ' + named(brush));
+    }
+    pluck(NOTES[Math.floor(Math.random() * NOTES.length)]);     // placing shapes plays a little tune
+  }, true);
+
+  /* ---------- emotion colours snap into the gaps the outline divides off ---------- */
+  let regions = [];
+  fetch('assets/v2/deco-regions.json').then(r => r.json()).then(r => { regions = r; }).catch(() => {});
+  const fillList = document.getElementById('fill-list');
+  const preview = document.getElementById('fill-preview');
+  const SNAP = 45;                            // px from a gap's edge at which a colour starts to snap
+  const regionPath = r => 'M' + r.pts.map(p => p.join(' ')).join('L') + 'Z';
+  function inside(r, x, y) {
+    let hit = false;
+    for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) {
+      const [xi, yi] = r.pts[i], [xj, yj] = r.pts[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  }
+  function edgeDist(r, x, y) {
+    let best = Infinity;
+    for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) {
+      const [ax, ay] = r.pts[j], [bx, by] = r.pts[i];
+      const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1;
+      const k = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L));
+      best = Math.min(best, Math.hypot(x - ax - k * dx, y - ay - k * dy));
+    }
+    return best;
+  }
+  function nearRegion(x, y) {
+    let pick = null, best = SNAP;
+    for (const r of regions) {
+      if (inside(r, x, y)) return r;
+      const d = edgeDist(r, x, y);
+      if (d < best) { best = d; pick = r; }
+    }
+    return pick;
+  }
+  function showPreview(r, colour) {
+    if (!r) return preview.classList.remove('on');
+    preview.setAttribute('d', regionPath(r));
+    preview.setAttribute('fill', colour); preview.setAttribute('stroke', colour);
+    preview.setAttribute('stroke-width', '8'); preview.setAttribute('stroke-linejoin', 'round');
+    preview.classList.add('on');
+  }
+  function fillRegion(r, st) {
+    fillList.querySelector(`[data-region="${r.id}"]`)?.remove();      // one colour per gap: the new one wins
+    const f = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    f.setAttribute('class', 'fill');
+    f.setAttribute('d', regionPath(r));
+    f.setAttribute('fill', st.fill); f.setAttribute('stroke', st.fill);
+    f.setAttribute('stroke-width', '8'); f.setAttribute('stroke-linejoin', 'round');
+    f.dataset.region = r.id;
+    f._st = st;
+    // pick a filled gap up again: it turns back into the colour blob under the pointer
+    f.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      const p = toStage(e), before = snapshot();
+      f.remove();
+      startDrag(addSticker(st, p.x, p.y), e, false, false, before);
+    });
+    fillList.appendChild(f);
+  }
+
+  /* one drag routine: move a shape, or (from its green handle) turn and resize it around its centre */
+  function startDrag(el, e, fresh, turning = false, before = snapshot()) {
+    select(el);
+    el.classList.add('dragging');
+    const t = el._t, p0 = toStage(e);
+    const a0 = Math.atan2(p0.y - t.y, p0.x - t.x), d0 = Math.hypot(p0.x - t.x, p0.y - t.y) || 1;
+    const start = { ...t };
+    let moved = 0;
+    const move = ev => {
+      const p = toStage(ev);
+      moved = Math.max(moved, Math.hypot(p.x - p0.x, p.y - p0.y));
+      if (turning) {
+        t.r = start.r + (Math.atan2(p.y - t.y, p.x - t.x) - a0) * 180 / Math.PI;
+        t.s = Math.min(5, Math.max(.25, start.s * Math.hypot(p.x - t.x, p.y - t.y) / d0));
+      } else {
+        t.x = start.x + p.x - p0.x; t.y = start.y + p.y - p0.y;
+        if (el._st.fill) {                    // an emotion colour: look for a gap to settle into
+          snap = nearRegion(t.x, t.y);
+          el.classList.toggle('snapping', !!snap);
+          showPreview(snap, el._st.fill);
+        }
+      }
+      place(el);
+    };
+    let snap = null;
+    const up = () => {
+      removeEventListener('pointermove', move);
+      removeEventListener('pointerup', up);
+      removeEventListener('pointercancel', up);
+      el.classList.remove('dragging');
+      if (turning) return recordAndShowButton(before, 'Turned ' + named(el._st));
+      showPreview(null);
+      if (snap && moved >= 6) { fillRegion(snap, el._st); removeSticker(el); return recordAndShowButton(before, 'Filled a gap'); }
+      if (fresh && moved >= 6) setBrush(null);
+      el.classList.remove('snapping');
+      if (fresh && moved < 6) { removeSticker(el); setBrush(el._st); }   // a click on the tray picks the shape up
+      else if (t.y > TRAY_TOP) { removeSticker(el); return recordAndShowButton(before, 'Removed ' + named(el._st)); }
+      recordAndShowButton(before, (fresh ? 'Placed ' : 'Moved ') + named(el._st));
+    };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', up);
+    addEventListener('pointercancel', up);
+  }
+  document.getElementById('d-clear').addEventListener('click', () => {
+    const before = snapshot();
+    select(null); board.replaceChildren(); fillList.replaceChildren();
+    recordAndShowButton(before, 'Cleared the board');
+  });
+
+  /* ---------- capture: draw the decorated hero onto a canvas ---------- */
+  const loadImg = src => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
+  const byline = (name, time) => (name ? 'Decorated by ' + name : 'My Circle Dance') + ' · ' +
+    new Date(time).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  // the Figma line drawing with its black stroke swapped for white, for night captures
+  const whiteDancers = () => fetch('assets/v2/dancers.svg').then(r => r.text()).then(t =>
+    loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t.replace(/stroke="#010101"/g, 'stroke="#ffffff"'))));
+  async function capture(name) {
+    const K = 2, c = document.createElement('canvas');
+    c.width = W * K; c.height = H * K;
+    const ctx = c.getContext('2d');
+    ctx.scale(K, K);
+    ctx.fillStyle = night ? '#4f4f4f' : '#f4f4f5'; ctx.fillRect(0, 0, W, H);
+    const [grass, dancers] = await Promise.all([loadImg('assets/v2/grass.svg'), night ? whiteDancers() : loadImg('assets/v2/dancers.svg')]);
+    ctx.globalAlpha = night ? .4 : 1;          // the grass sits back at night, as on screen
+    ctx.drawImage(grass, -12, -13, 1552.2, 1032.19);
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.filter = 'blur(2.5px)'; ctx.lineJoin = 'round'; ctx.lineWidth = 8;
+    for (const f of fillList.children) {
+      const path = new Path2D(f.getAttribute('d'));
+      ctx.fillStyle = ctx.strokeStyle = f._st.fill;
+      ctx.fill(path); ctx.stroke(path);
+    }
+    ctx.restore();
+    ctx.drawImage(dancers, 222, 247, 1132, 585);
+    for (const el of board.children) {
+      const t = el._t, img = await loadImg(el.querySelector('img').src);
+      ctx.save();
+      ctx.translate(t.x, t.y); ctx.rotate(t.r * Math.PI / 180); ctx.scale(t.s, t.s);
+      ctx.drawImage(img, -t.w / 2, -t.h / 2, t.w, t.h);
+      ctx.restore();
+    }
+    await document.fonts.load("400 55px 'MuseoModerno'");
+    await document.fonts.load("300 20px 'MuseoModerno'");
+    ctx.fillStyle = night ? '#fff' : '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.font = "400 55px 'MuseoModerno'";
+    ctx.fillText('CIRCLE', 755.5, 37); ctx.fillText('DANCE', 755.5, 92);
+    ctx.textAlign = 'left'; ctx.font = "300 20px 'MuseoModerno'";
+    ctx.fillText(byline(name, Date.now()), 36, 931);
+    return new Promise(ok => c.toBlob(ok, 'image/png'));
+  }
+  const capBtn = document.getElementById('d-capture');
+  const nameDialog = document.getElementById('name-dialog');
+  const nameInput = document.getElementById('d-name');
+  const NAME_KEY = 'circle-dance-name';
+  const cleanName = v => v.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  function askName(on) {
+    nameDialog.classList.toggle('on', on);
+    nameDialog.setAttribute('aria-hidden', String(!on));
+    if (on) {
+      try { nameInput.value = localStorage.getItem(NAME_KEY) || ''; } catch {}
+      setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
+    } else capBtn.focus();
+  }
+  capBtn.addEventListener('click', () => { setBrush(null); select(null); askName(true); });   // put a held shape down first
+  document.getElementById('name-cancel').addEventListener('click', () => askName(false));
+  document.getElementById('name-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = cleanName(nameInput.value);
+    try { localStorage.setItem(NAME_KEY, name); } catch {}
+    askName(false);
+    capBtn.disabled = true; capBtn.textContent = 'capturing…';
+    const flash = document.getElementById('flash');
+    flash.classList.remove('on'); void flash.offsetWidth; flash.classList.add('on');
+    try {
+      const blob = await capture(name);
+      const item = await gallery.add(blob, name);
+      await showGallery(true, item.id);
+    } catch (err) {
+      console.error(err);
+      alert('Sorry, the capture could not be saved. Please try again.');
+    } finally {
+      capBtn.disabled = false; capBtn.textContent = 'capture';
+    }
+  });
+
+  /* ---------- gallery storage: the shared gallery on the site's server (serve.py), or, where the
+     site is hosted without it, this browser's own storage ---------- */
+  const gallery = (() => {
+    let mode = null;                          // 'server' | 'local'
+    const db = () => new Promise((ok, no) => {
+      const r = indexedDB.open('circle-dance-gallery', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('shots', { keyPath: 'id' });
+      r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
+    });
+    const tx = async (how, fn) => {
+      const d = await db();
+      return new Promise((ok, no) => { const t = d.transaction('shots', how); const q = fn(t.objectStore('shots')); t.oncomplete = () => ok(q.result); t.onerror = () => no(t.error); });
+    };
+    const urls = new Map();
+    const OWN_KEY = 'circle-dance-owned';     // { capture id: delete key } for captures this browser uploaded
+    const owned = () => { try { return JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch { return {}; } };
+    const setOwned = (id, token) => {
+      const o = owned();
+      if (token) o[id] = token; else delete o[id];
+      try { localStorage.setItem(OWN_KEY, JSON.stringify(o)); } catch {}
+    };
+    const localUrl = s => { if (!urls.has(s.id)) urls.set(s.id, URL.createObjectURL(s.blob)); return urls.get(s.id); };
+    async function detect() {
+      if (mode) return mode;
+      try { const r = await fetch('api/gallery', { cache: 'no-store' }); mode = r.ok ? 'server' : 'local'; }
+      catch { mode = 'local'; }
+      return mode;
+    }
+    return {
+      async list() {
+        if (await detect() === 'server') {
+          const r = await fetch('api/gallery', { cache: 'no-store' });
+          if (r.ok) return r.json();
+        }
+        const all = await tx('readonly', s => s.getAll());
+        return all.sort((a, b) => b.time - a.time).map(s => ({ id: s.id, time: s.time, name: s.name || '', url: localUrl(s) }));
+      },
+      async add(blob, name) {
+        if (await detect() === 'server') {
+          const r = await fetch('api/gallery', { method: 'POST', body: blob,
+            headers: { 'Content-Type': 'image/png', 'X-Name': encodeURIComponent(name) } });
+          if (r.ok) { const it = await r.json(); setOwned(it.id, it.token); return it; }
+        }
+        const shot = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), name, blob };
+        await tx('readwrite', s => s.put(shot));
+        return { id: shot.id, time: shot.time, name, url: localUrl(shot) };
+      },
+      // On the shared gallery only the browser that uploaded a capture holds its delete key;
+      // in a browser-only gallery everything there is the visitor's own.
+      canDelete(id) { return mode === 'local' || !!owned()[id]; },
+      async remove(id) {
+        if (mode === 'server') {
+          const r = await fetch('api/gallery/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'X-Delete-Token': owned()[id] || '' } });
+          if (!r.ok && r.status !== 404) throw new Error('delete failed: ' + r.status);
+          setOwned(id, null);
+          return;
+        }
+        await tx('readwrite', s => s.delete(id));
+        if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+      },
+      get mode() { return mode; },
+    };
+  })();
+
+  const gal = document.getElementById('gallery');
+  const grid = document.getElementById('g-grid');
+  const lightbox = document.getElementById('lightbox');
+  async function showGallery(on, highlight) {
+    if (on && brush) setBrush(null);            // a held shape is put down before the gallery opens
+    body.classList.toggle('gallery-open', on);
+    gal.setAttribute('aria-hidden', String(!on));
+    if (!on) return;
+    let items = [];
+    try { items = await gallery.list(); } catch (err) { console.error(err); }
+    document.getElementById('g-count').textContent =
+      (items.length === 1 ? '1 Circle Dance' : items.length + ' Circle Dances') +
+      (gallery.mode === 'local' ? ' · saved in this browser' : '');
+    grid.replaceChildren();
+    if (!items.length) grid.innerHTML = '<p class="g-empty">Nothing here yet.<br>Decorate the dancers and press capture.</p>';
+    for (const it of items) {
+      const card = document.createElement('figure');
+      card.className = 'g-card';
+      const b = document.createElement('button');
+      b.className = 'g-item' + (it.id === highlight ? ' new' : '');
+      b.setAttribute('aria-label', 'Open capture by ' + (it.name || 'someone') + ', ' + new Date(it.time).toLocaleString());
+      const img = document.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.src = it.url;
+      b.appendChild(img);
+      b.addEventListener('click', () => openShot(it));
+      const cap = document.createElement('figcaption');
+      cap.textContent = it.name || 'anonymous';      // textContent: names are shown as plain text, never as HTML
+      if (gallery.canDelete(it.id) && gallery.mode === 'server') cap.insertAdjacentHTML('beforeend', ' <span class="mine">· yours</span>');
+      card.append(b, cap);
+      grid.appendChild(card);
+    }
+    grid.scrollTop = 0;
+  }
+  const delBtn = document.getElementById('lb-delete');
+  let shown = null;
+  function openShot(it) {
+    shown = it;
+    document.getElementById('lb-img').src = it.url;
+    document.getElementById('lb-save').href = it.url;
+    document.getElementById('lb-save').download = 'circle-dance' + (it.name ? '-' + it.name.replace(/[^\p{L}\p{N}]+/gu, '-') : '') + '.png';
+    document.getElementById('lb-meta').textContent = byline(it.name, it.time);
+    delBtn.hidden = !gallery.canDelete(it.id);
+    disarm();
+    lightbox.classList.add('on'); lightbox.setAttribute('aria-hidden', 'false');
+  }
+  function closeShot() { lightbox.classList.remove('on'); lightbox.setAttribute('aria-hidden', 'true'); shown = null; disarm(); }
+  // delete asks twice: the first click arms the button, a second click within a few seconds deletes
+  function disarm() { clearTimeout(disarm.t); delBtn.classList.remove('arm'); delBtn.textContent = 'delete'; }
+  delBtn.addEventListener('click', async () => {
+    if (!shown) return;
+    if (!delBtn.classList.contains('arm')) {
+      delBtn.classList.add('arm'); delBtn.textContent = 'click again to delete';
+      disarm.t = setTimeout(disarm, 4000);
+      return;
+    }
+    const id = shown.id;
+    delBtn.disabled = true;
+    try {
+      await gallery.remove(id);
+      closeShot();
+      await showGallery(true);
+    } catch (err) {
+      console.error(err);
+      alert('Sorry, this capture could not be deleted.');
+    } finally { delBtn.disabled = false; }
+  });
+  document.getElementById('d-gallery').addEventListener('click', () => showGallery(true));
+  document.getElementById('g-close').addEventListener('click', () => showGallery(false));
+  document.getElementById('g-decorate').addEventListener('click', () => { showGallery(false); if (!decorating) toggle('decorate'); });
+  document.getElementById('lb-close').addEventListener('click', closeShot);
+
+})();
+</script>
+</body>
+</html>

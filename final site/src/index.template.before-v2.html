@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle Dance</title>
+<meta name="description" content="Circle Dance brings people together — an interactive look at how visitors move around, touch, and gather at Tom Friedman's sculpture.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Enriqueta:wght@600&family=Epunda+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Lemonada:wght@600;700&family=Lexend+Mega:wght@200;300&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.11"></script>
+<style>
+  :root {
+    --cream: #fdfff0;
+    --ink: #4e3629;
+    --t: 700ms;
+    color-scheme: light;
+  }
+  html, body { margin: 0; height: 100%; background: var(--cream); overflow: clip; }
+  body { font-family: 'Epunda Sans', system-ui, sans-serif; color: var(--ink); }
+
+  /* The design is a single 1512×982 artboard; JS scales it to fit the window. */
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    width: 1512px; height: 982px;
+    transform-origin: center center;
+    background: var(--cream);
+  }
+
+  /* ---------- state layers ---------- */
+  .layer { position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none;
+           transition: opacity var(--t) ease, visibility 0s linear var(--t); }
+  .layer > * { pointer-events: auto; }
+  .layer.passive > * { pointer-events: none; }
+  /* several layers can be on at once — each blob adds an on-<name> class to body */
+  body.on-history  .layer[data-for~="history"],
+  body.on-emotion  .layer[data-for~="emotion"],
+  body.on-duration .layer[data-for~="duration"],
+  body.on-movement .layer[data-for~="movement"],
+  body.on-group    .layer[data-for~="group"],
+  body.on-touch    .layer[data-for~="touch"] {
+    opacity: 1; visibility: visible; transition: opacity var(--t) ease, visibility 0s;
+  }
+
+  /* only the most recently opened layer shows its heading */
+  .layer .title, .layer .subtitle { opacity: 0; transition: opacity 500ms ease; }
+  body[data-top="history"]  .layer[data-for~="history"]  :is(.title, .subtitle),
+  body[data-top="emotion"]  .layer[data-for~="emotion"]  :is(.title, .subtitle),
+  body[data-top="duration"] .layer[data-for~="duration"] :is(.title, .subtitle),
+  body[data-top="movement"] .layer[data-for~="movement"] :is(.title, .subtitle),
+  body[data-top="group"]    .layer[data-for~="group"]    :is(.title, .subtitle),
+  body[data-top="touch"]    .layer[data-for~="touch"]    :is(.title, .subtitle) { opacity: 1; }
+
+  /* the start screen lifts the sculpture a little higher than the data views */
+  #grass, #sculpt { transition: transform 900ms cubic-bezier(.5,0,.2,1); }
+  body.none-on #grass  { transform: translate(-5px, -28px); }
+  body.none-on #sculpt { transform: translate(0, -45px); }
+
+  /* ---------- blob buttons ---------- */
+  .blob { position: absolute; padding: 0; border: 0; background: none; cursor: pointer;
+          transition: transform 400ms cubic-bezier(.3,1.6,.5,1), filter 300ms; -webkit-tap-highlight-color: transparent; }
+  .blob img { pointer-events: none; }
+  .blob:hover { transform: scale(1.07) rotate(-3deg); }
+  .blob:focus-visible { outline: 2px dashed #a58be0; outline-offset: 4px; border-radius: 50%; }
+  .blob[aria-pressed="true"] { transform: scale(1.1); }
+
+  .title { position: absolute; left: 756px; top: 74px; transform: translateX(-50%); white-space: nowrap;
+           font-family: 'Lemonada', serif; font-weight: 600; font-size: 30px; letter-spacing: -1.5px; margin: 0; color: var(--ink); }
+  .subtitle { position: absolute; left: 756px; top: 130px; transform: translateX(-50%); white-space: nowrap;
+              font-family: 'Lexend Mega', sans-serif; font-weight: 300; font-size: 15px; line-height: 1.5; letter-spacing: -0.33px;
+              text-shadow: 0 2px 4px rgba(0,0,0,.25); margin: 0; color: var(--ink); }
+
+  /* ---------- 6 · physical touch ---------- */
+  .tring { position: absolute; transform-origin: center; animation: flash 3.2s ease-in-out infinite; }
+  .tring img { width: 100%; height: 100%; display: block; }
+  @keyframes flash {
+    0%, 100% { opacity: .15; transform: scale(.55); }
+    35%      { opacity: 1;   transform: scale(1); }
+    70%      { opacity: .55; transform: scale(.9); }
+  }
+  .spot { position: absolute; border-radius: 50%; cursor: default; }
+  .spot-label { position: absolute; width: 98px; text-align: center; font-weight: 500; font-size: 14px;
+                line-height: 1.28; letter-spacing: -0.308px; opacity: 0; transform: translateY(-4px);
+                transition: opacity 250ms, transform 250ms; pointer-events: none; }
+  .spot:hover + .spot-label, .spot:focus-visible + .spot-label { opacity: 1; transform: none; }
+
+  /* ---------- 2 · emotion ---------- */
+  #emo-fill { position: absolute; left: 244px; top: 255px; width: 1067px; height: 572px; overflow: visible; }
+
+  /* ---------- 4 · movement ---------- */
+  #mv .fp-step { opacity: 0; }
+
+  /* ---------- legends: hidden until the small companion blob is clicked ---------- */
+  .layer .legend { opacity: 0; pointer-events: none; transition: opacity 500ms ease; }
+  .layer .legend.on { opacity: 1; }
+  .layer .legend-btn { pointer-events: auto; z-index: 5; }  /* sits above the big blobs it overlaps */
+
+  /* ---------- 5 · group size ---------- */
+  .grp { opacity: 0; }
+  body.on-group .grp { animation: grp-in 1s ease-in-out forwards; animation-delay: calc(var(--i) * 1s + .3s); }
+  @keyframes grp-in { to { opacity: 1; } }
+  .spin { animation: spin 48s linear infinite; animation-play-state: paused; transform-origin: center; }
+  .spin.ccw { animation-direction: reverse; }
+  body.grp-spin .spin { animation-play-state: running; }
+  @keyframes spin { to { rotate: 360deg; } }
+
+  /* ---------- 1 · history ---------- */
+  #hist-circle { position: absolute; left: 397px; top: 194px; width: 711px; height: 711px; border-radius: 50%;
+                 transform: scale(.6); opacity: 0; transition: transform 700ms cubic-bezier(.3,1.4,.5,1), opacity 400ms; }
+  body.on-history #hist-circle { transform: none; opacity: 1; }
+  /* The blurred background is a pre-blurred copy of the grass and sculpture held inside the circle, not a live
+     backdrop-filter: browsers skip backdrop blur while the circle animates, which made it pop in late. */
+  .hist-backdrop { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; background: var(--cream); }
+  .hist-backdrop .hb-art { position: absolute; left: -397px; top: -194px; width: 1512px; height: 982px; filter: blur(22px); }
+  .hist-backdrop .hb-art img { position: absolute; max-width: none; }
+  .hist-backdrop::after { content: ""; position: absolute; inset: 0; background: rgba(219,197,249,.2); }
+  /* the History layer itself never fades: a backdrop blur doesn't render while a parent is semi-transparent,
+     so fading the layer made the blur pop in late. The circle and heading do their own fading instead. */
+  .layer#history { opacity: 1; transition: visibility 0s linear 700ms; }
+  body.on-history .layer#history { transition: visibility 0s; }
+  .slide { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity 450ms ease, visibility 0s linear 450ms; }
+  .slide.on { opacity: 1; visibility: visible; transition: opacity 450ms ease 150ms, visibility 0s; }
+  /* while History is closed nothing inside it may catch the mouse (the slides and arrows set their own visibility) */
+  body:not(.on-history) #hist-circle > :not(.hist-backdrop), body:not(.on-history) #hist-circle > :not(.hist-backdrop) * { visibility: hidden !important; }
+  .slide-body { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .slide-head { margin: 0 0 30px; font-family: 'Epunda Sans', sans-serif; font-weight: 600; font-size: 23px; line-height: normal; color: #000; }
+  .slide-head .amp { font-family: 'Enriqueta', serif; font-weight: 600; }
+  .slide-text { margin: 0; max-width: 430px; font-size: 23px; line-height: 1.46; letter-spacing: -0.506px; }
+  .caption { position: absolute; text-align: center; font-size: 17px; line-height: 1.5; letter-spacing: -0.374px; margin: 0; }
+  .icon-btn { position: absolute; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer;
+              border-radius: 50%; transition: transform 200ms; }
+  .icon-btn img { width: 100%; height: 100%; display: block; }
+  .icon-btn:hover { transform: scale(1.25); }
+  .icon-btn:focus-visible { outline: 2px dashed #a58be0; outline-offset: 3px; }
+
+  #home-link { position: absolute; left: 28px; top: 30px; width: 80px; height: 36px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 18px; }
+  #home-link:focus-visible { outline: 2px dashed #a58be0; outline-offset: 3px; }
+
+  /* The leaf logo turns into the title while you hover it, and back when you move away. */
+  #logo { transition: opacity 400ms ease, transform 550ms cubic-bezier(.3,1.3,.5,1); transform-origin: 54px 49px; }
+  #brand-title { position: absolute; left: 34px; top: 16px; margin: 0; color: var(--ink); font-weight: 400; cursor: pointer;
+                 font-family: 'Lemonada', serif; transform-origin: 22px 33px;
+                 opacity: 0; visibility: hidden; transform: scale(.3); filter: blur(4px);
+                 transition: opacity 450ms ease, transform 550ms cubic-bezier(.3,1.3,.5,1), filter 450ms ease, visibility 0s linear 550ms; }
+  /* the title stays hoverable while it shows, so moving onto it keeps it open */
+  body.peek-on #logo { opacity: 0; transform: scale(1.6) rotate(25deg); }
+  body.peek-on #brand-title { opacity: 1; visibility: visible; transform: none; filter: none;
+                              transition: opacity 450ms ease, transform 550ms cubic-bezier(.3,1.3,.5,1), filter 450ms ease, visibility 0s; }
+
+  /* ear button: sound waves ripple out while the ambience plays */
+  #ear { padding: 0; border: 0; background: none; cursor: pointer; transition: transform 300ms cubic-bezier(.3,1.6,.5,1); }
+  #ear:hover { transform: scale(1.12); }
+  #ear:focus-visible { outline: 2px dashed #a58be0; outline-offset: 6px; border-radius: 8px; }
+  #ear::before, #ear::after { content: ""; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+                              border-radius: 50%; border: 1.5px solid #b9a3e8; opacity: 0; pointer-events: none; }
+  #ear[aria-pressed="true"]::before { animation: ear-wave 2.4s ease-out infinite; }
+  #ear[aria-pressed="true"]::after  { animation: ear-wave 2.4s ease-out 1.2s infinite; }
+  @keyframes ear-wave { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.9); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tring, .spin { animation: none !important; }
+  }
+</style>
+</head>
+<body class="none-on" data-top="home">
+<div id="stage">
+
+  <!-- brand: the leaf logo is a button that turns into the title "Circle Dance / brings people together" -->
+  <div id="brand">
+  <button id="home-link" aria-label="Circle Dance — back to start" title="Circle Dance"></button>
+  <div id="logo" class="absolute inset-0 pointer-events-none">
+  <div class="absolute flex h-[26px] items-center justify-center left-[30.58px] top-[37px] w-[25.816px]">
+    <div class="flex-none rotate-[-42.8deg]"><div class="h-[20.028px] relative w-[16.638px] overflow-hidden">
+      <img alt="" class="absolute h-[154.23%] left-[-38.48%] max-w-none top-[-34.55%] w-[185.6%]" src="assets/leaf.png">
+    </div></div>
+  </div>
+  <div class="absolute flex h-[23.722px] items-center justify-center left-[52.85px] top-[37px] w-[25.288px]">
+    <div class="flex-none rotate-[64.06deg]"><div class="h-[20.028px] relative w-[16.638px] overflow-hidden">
+      <img alt="" class="absolute h-[154.23%] left-[-38.48%] max-w-none top-[-34.55%] w-[185.6%]" src="assets/leaf.png">
+    </div></div>
+  </div>
+  <div class="absolute flex h-[24.547px] items-center justify-center left-[77.41px] top-[37px] w-[25.723px]">
+    <div class="flex-none rotate-[-59.2deg]"><div class="h-[20.028px] relative w-[16.638px] overflow-hidden">
+      <img alt="" class="absolute h-[154.23%] left-[-38.48%] max-w-none top-[-34.55%] w-[185.6%]" src="assets/leaf.png">
+    </div></div>
+  </div>
+  </div>
+  <h1 id="brand-title">
+    <span class="block font-bold leading-[1.85] tracking-[0.33px]"><span class="text-[35px]">C</span><span class="text-[27px]">i</span><span class="text-[33px]">rcle Dance</span></span>
+    <span class="block font-['Lexend_Mega'] font-extralight text-[15px] leading-[1.2] -mt-1">brings people together</span>
+  </h1>
+  </div>
+
+  <!-- ear: plays the night-time ambience (crickets + people talking) -->
+  <button id="ear" class="absolute h-[47px] left-[35px] top-[903px] w-[29px]" aria-label="Play ambient sound" aria-pressed="false" title="Listen">
+    <div class="absolute inset-[-4.26%_-6.9%]"><img alt="" class="block max-w-none size-full" src="assets/ear.svg"></div>
+  </button>
+
+  <!-- grass -->
+  <img id="grass" alt="" class="absolute h-[632px] left-[236px] top-[220px] w-[1012px] max-w-none" src="assets/grass2.svg">
+
+  <!-- ===== under-sculpture data ===== -->
+
+  <!-- 4 · movement footprints -->
+  <div class="layer passive" data-for="movement" id="mv">
+{{MV_FOOT}}
+  </div>
+
+  <!-- 2 · emotion colour regions -->
+  <div class="layer passive" data-for="emotion">
+{{EMO_FILL}}
+  </div>
+
+  <!-- sculpture -->
+  <div id="sculpt" class="absolute h-[547px] left-[303px] top-[255px] w-[1008px] pointer-events-none">
+    <img alt="Illustration of eleven figures holding hands in a circle" class="absolute max-w-none left-[-59px] top-0 w-[1052px] h-[571px]" src="assets/sculpt_glow.png">
+    <img alt="" class="absolute max-w-none left-[-55.9px] top-[3.06px] w-[1045.9px] h-[565.1px]" src="assets/sculpt_body.png">
+  </div>
+
+  <!-- ===== over-sculpture data ===== -->
+
+  <!-- 6 · physical touch -->
+  <div class="layer" data-for="touch">
+    <!-- hand: three stacked rings (most touched) -->
+    <div class="tring left-[466px] top-[508px] w-[114px] h-[114px]" style="animation-delay:0s"><img alt="" src="assets/touch_e104.svg"></div>
+    <div class="tring left-[472px] top-[514px] w-[101px] h-[101px]" style="animation-delay:.25s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[480px] top-[522px] w-[85px] h-[85px]" style="animation-delay:.5s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- head: two rings -->
+    <div class="tring left-[731px] top-[255px] w-[101px] h-[101px]" style="animation-delay:.9s"><img alt="" src="assets/touch_e102.svg"></div>
+    <div class="tring left-[739px] top-[263px] w-[85px] h-[85px]" style="animation-delay:1.15s"><img alt="" src="assets/touch_e103.svg"></div>
+    <!-- torso / other: single rings -->
+    <div class="tring left-[815px] top-[579px] w-[85px] h-[85px]" style="animation-delay:1.6s"><img alt="" src="assets/touch_e103.svg"></div>
+    <div class="tring left-[1166px] top-[486px] w-[85px] h-[85px]" style="animation-delay:2.1s"><img alt="" src="assets/touch_e103.svg"></div>
+
+    <div class="spot left-[466px] top-[508px] w-[114px] h-[114px]" tabindex="0" aria-label="Hand 42%"></div>
+    <p class="spot-label left-[473px] top-[622px] m-0">Hand<br>42%</p>
+    <div class="spot left-[731px] top-[255px] w-[101px] h-[101px]" tabindex="0" aria-label="Head 28%"></div>
+    <p class="spot-label left-[731px] top-[359px] m-0">Head<br>28%</p>
+    <div class="spot left-[815px] top-[579px] w-[85px] h-[85px]" tabindex="0" aria-label="Torso 18%"></div>
+    <p class="spot-label left-[806px] top-[664px] m-0">Torso<br>18%</p>
+    <div class="spot left-[1166px] top-[486px] w-[85px] h-[85px]" tabindex="0" aria-label="Other 12%"></div>
+    <p class="spot-label left-[1160px] top-[573px] m-0">Other<br>12%</p>
+
+    <!-- legend (shown by the small blob) -->
+    <div class="legend absolute inset-0" id="legend-touch">
+      <div class="absolute inset-[80.93%_8.06%_13.44%_88.28%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e106.svg"></div>
+      <div class="absolute inset-[81.38%_8.35%_13.89%_88.57%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e107.svg"></div>
+      <div class="absolute inset-[80.55%_7.81%_13.06%_88.04%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e108.svg"></div>
+      <div class="absolute inset-[72.96%_7.96%_21.1%_88.18%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e113.svg"></div>
+      <div class="absolute inset-[73.49%_8.3%_21.63%_88.52%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e114.svg"></div>
+      <div class="absolute inset-[72.66%_7.72%_20.73%_87.99%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e115.svg"></div>
+      <div class="absolute inset-[72.21%_7.42%_20.28%_87.7%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e116.svg"></div>
+      <div class="absolute inset-[64.39%_7.96%_29.75%_88.23%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e117.svg"></div>
+      <div class="absolute inset-[64.84%_8.25%_30.2%_88.52%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e118.svg"></div>
+      <div class="absolute inset-[64.02%_7.72%_29.3%_87.94%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e119.svg"></div>
+      <div class="absolute inset-[63.64%_7.47%_28.92%_87.7%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e120.svg"></div>
+      <div class="absolute inset-[63.34%_7.28%_28.62%_87.5%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e121.svg"></div>
+      <div class="absolute inset-[93.63%_8.69%_2.77%_88.96%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e109.svg"></div>
+      <div class="absolute inset-[87.76%_8.25%_7.2%_88.48%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e101.svg"></div>
+      <div class="absolute inset-[88.14%_8.5%_7.58%_88.72%]"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/touch_e100.svg"></div>
+      <p class="absolute m-0 font-medium inset-[66.4%_1.72%_31.77%_93.52%] leading-[1.28] text-[14px] tracking-[-0.308px]">80~100%</p>
+      <p class="absolute m-0 font-medium inset-[75.25%_1.3%_23.39%_93.92%] leading-[1.28] text-[14px] tracking-[-0.308px]">60~80%</p>
+      <p class="absolute m-0 font-medium inset-[82.99%_1.3%_15.65%_93.92%] leading-[1.28] text-[14px] tracking-[-0.308px]">40~60%</p>
+      <p class="absolute m-0 font-medium inset-[89%_1.24%_9.65%_93.98%] leading-[1.28] text-[14px] tracking-[-0.308px]">20~40%</p>
+      <p class="absolute m-0 font-medium inset-[94.7%_0.77%_3.94%_94.44%] leading-[1.28] text-[14px] tracking-[-0.308px]">0~20%</p>
+    </div>
+    <!-- small companion blob: toggles the legend -->
+    <button class="blob legend-btn absolute aspect-[104.34/99.303] flex items-center justify-center left-[75.66%] right-[17.44%] top-[134px]" style="container-type:size" data-legend="touch" aria-label="Show legend" aria-pressed="false" title="Legend">
+      <div class="flex-none h-[hypot(-28.994cqw,65.0698cqh)] rotate-[25.09deg] w-[hypot(71.006cqw,34.9302cqh)]">
+        <div class="relative size-full"><div class="absolute inset-0 opacity-60 overflow-hidden">
+          <img alt="" class="absolute h-[188.97%] left-[-33.81%] max-w-none top-[-51.16%] w-[164.77%]" src="assets/src697.png">
+        </div></div>
+      </div>
+    </button>
+    <h2 class="title">Physical Touch</h2>
+    <p class="subtitle">Where people touched the sculpture</p>
+  </div>
+
+  <!-- 3 · duration -->
+  <div class="layer passive" data-for="duration">
+    <div class="absolute h-[547px] left-[303px] top-[255px] w-[1008px]">
+      <div class="absolute flex inset-[45.34%_91.33%_37.91%_-1.98%] items-center justify-center" style="container-type:size">
+        <div class="flex-none h-[hypot(18.3317cqw,71.1104cqh)] rotate-[-16.8deg] w-[hypot(81.6683cqw,-28.8896cqh)]">
+          <div class="relative size-full eye"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/eye2.svg"></div>
+        </div>
+      </div>
+      <div class="absolute flex h-[91.209px] items-center justify-center left-[134.88px] top-[-17.86px] w-[64.476px]">
+        <div class="flex-none rotate-[60.98deg]">
+          <div class="h-[22.92px] relative w-[91.59px] eye"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/eye3.svg"></div>
+        </div>
+      </div>
+      <div class="absolute flex inset-[-10.24%_33.28%_87.83%_54.46%] items-center justify-center" style="container-type:size">
+        <div class="flex-none h-[hypot(-43.6486cqw,-51.4554cqh)] rotate-[139.47deg] w-[hypot(-56.3514cqw,48.5446cqh)]">
+          <div class="relative size-full eye"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/eye4.svg"></div>
+        </div>
+      </div>
+      <div class="absolute flex h-[83.337px] items-center justify-center left-[636px] top-[433px] w-[95.265px]">
+        <div class="flex-none rotate-[-143.76deg]">
+          <div class="h-[36.19px] relative w-[91.59px] eye"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/eye5.svg"></div>
+        </div>
+      </div>
+      <div class="absolute flex inset-[5.93%_0.91%_74.51%_87.79%] items-center justify-center" style="container-type:size">
+        <div class="flex-none h-[hypot(-32.54cqw,-53.3895cqh)] rotate-[147.02deg] w-[hypot(-67.46cqw,46.6105cqh)]">
+          <div class="relative size-full eye"><img alt="" class="absolute block inset-0 max-w-none size-full" src="assets/eye6.svg"></div>
+        </div>
+      </div>
+    </div>
+    <div class="legend absolute inset-0" id="legend-duration">
+      <img alt="" class="absolute h-[195.58px] left-[1342px] top-[761px] w-[70.364px] max-w-none" src="assets/dur_legend.svg">
+      <p class="absolute m-0 font-medium inset-[77.49%_-0.68%_21.15%_95.9%] leading-[1.28] text-[14px] tracking-[-0.308px]">5 min</p>
+      <p class="absolute m-0 font-medium inset-[81.06%_-0.29%_17.59%_95.5%] leading-[1.28] text-[14px] tracking-[-0.308px]">15 min</p>
+      <p class="absolute m-0 font-medium inset-[86.46%_-0.29%_12.19%_95.5%] leading-[1.28] text-[14px] tracking-[-0.308px]">25 min</p>
+      <p class="absolute m-0 font-medium inset-[93.08%_0.51%_5.57%_94.71%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">+ 25 min</p>
+    </div>
+    <button class="blob legend-btn absolute flex h-[61.961px] items-center justify-center left-[294px] top-[872px] w-[70.055px]" data-legend="duration" aria-label="Show legend" aria-pressed="false" title="Legend">
+      <div class="flex-none rotate-[-89.05deg]"><div class="h-[69.056px] opacity-60 relative w-[60.826px] overflow-hidden">
+        <img alt="" class="absolute h-[150.34%] left-[-38.07%] max-w-none top-[-29.92%] w-[170.64%]" src="assets/src42.png">
+      </div></div>
+    </button>
+    <h2 class="title">Duration</h2>
+    <p class="subtitle">How long do people look at or stay near the sculpture</p>
+  </div>
+
+  <!-- 5 · group size -->
+  <div class="layer passive" data-for="group">
+    <!-- People 1 (single visitors) -->
+    <div class="grp absolute h-[89.737px] left-[1087px] top-[175px] w-[90.077px]" style="--i:0">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F5.svg">
+    </div>
+    <div class="grp absolute flex h-[127.119px] items-center justify-center left-[1413.67px] top-[562.63px] w-[127.128px]" style="--i:0">
+      <div class="flex-none rotate-[43.88deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F13.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[107.13px] items-center justify-center left-[111.8px] top-[193.62px] w-[106.87px]" style="--i:0">
+      <div class="flex-none rotate-[77.7deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F10.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[126.717px] items-center justify-center left-[509.06px] top-[492.21px] w-[126.756px]" style="--i:0">
+      <div class="flex-none rotate-[40.39deg]"><div class="h-[89.737px] relative w-[90.077px]">
+        <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F7.svg">
+      </div></div>
+    </div>
+    <!-- People 2 (pairs) -->
+    <div class="grp absolute h-[135px] left-[1257px] top-[40px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F3.svg">
+    </div>
+    <div class="grp absolute h-[135px] left-[912px] top-[874px] w-[109px]" style="--i:1">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F3.svg">
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[369.74px] top-[-62.12px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F11.svg">
+      </div></div>
+    </div>
+    <div class="grp absolute flex h-[171.245px] items-center justify-center left-[66px] top-[358px] w-[161.511px]" style="--i:1">
+      <div class="flex-none rotate-[29.65deg]"><div class="h-[135px] relative w-[109px]">
+        <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F11.svg">
+      </div></div>
+    </div>
+    <!-- People 3 -->
+    <div class="grp absolute h-[139px] left-[409px] top-[797px] w-[145px]" style="--i:2">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F4.svg">
+    </div>
+    <!-- People 4 -->
+    <div class="grp absolute h-[137px] left-[269px] top-[142px] w-[133px]" style="--i:3">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F14.svg">
+    </div>
+    <div class="grp absolute left-[912px] top-[639px] w-[133px] h-[139px]" style="--i:3">
+      <div class="spin ccw absolute inset-0">
+        <img alt="" class="absolute max-w-none left-[92px] top-[37px] w-[21px] h-[23px]" src="assets/grp_v0.svg">
+        <img alt="" class="absolute max-w-none left-[74px] top-[13px] w-[59px] h-[61px]" src="assets/grp_v1.svg">
+        <img alt="" class="absolute max-w-none left-[31px] top-[25px] w-[23px] h-[21px]" src="assets/grp_v2.svg">
+        <img alt="" class="absolute max-w-none left-[6px] top-[0px] w-[63px] h-[62px]" src="assets/grp_v3.svg">
+        <img alt="" class="absolute max-w-none left-[23px] top-[80px] w-[22px] h-[22px]" src="assets/grp_v4.svg">
+        <img alt="" class="absolute max-w-none left-[0px] top-[66px] w-[62px] h-[62px]" src="assets/grp_v5.svg">
+        <img alt="" class="absolute max-w-none left-[77px] top-[94px] w-[23px] h-[22px]" src="assets/grp_v6.svg">
+        <img alt="" class="absolute max-w-none left-[63px] top-[77px] w-[62px] h-[60px]" src="assets/grp_v7.svg">
+      </div>
+    </div>
+    <!-- People 5 -->
+    <div class="grp absolute h-[158px] left-[43px] top-[629px] w-[165px]" style="--i:4">
+      <img alt="" class="spin absolute block inset-0 max-w-none size-full" src="assets/grp_F9.svg">
+    </div>
+    <!-- People 6 -->
+    <div class="grp absolute h-[182px] left-[868px] top-[380px] w-[188px]" style="--i:5">
+      <img alt="" class="spin ccw absolute block inset-0 max-w-none size-full" src="assets/grp_F8.svg">
+    </div>
+
+    <div class="legend absolute inset-0" id="legend-group">
+      <img alt="Legend: one to six people" class="absolute left-[1266px] top-[826px] w-[246px] h-[146px] max-w-none" src="assets/group_legend.png">
+    </div>
+
+    <button class="blob legend-btn absolute flex h-[79.048px] items-center justify-center left-[1325px] top-[558px] w-[78.976px]" data-legend="group" aria-label="Show legend" aria-pressed="false" title="Legend">
+      <div class="flex-none rotate-[-44.33deg]"><div class="h-[58.047px] relative w-[53.7px]">
+        <div class="absolute inset-0 opacity-60 overflow-hidden">
+          <img alt="" class="absolute h-[179.1%] left-[-48.58%] max-w-none top-[-43.02%] w-[193.55%]" src="assets/srcs5.png">
+        </div>
+      </div></div>
+    </button>
+    <h2 class="title">Group Size</h2>
+    <p class="subtitle">Whether people pass by alone, in pairs, or in groups</p>
+  </div>
+
+  <!-- 2 · emotion legend + title -->
+  <div class="layer passive" data-for="emotion">
+    <div class="legend absolute inset-0" id="legend-emotion">
+    <div class="absolute inset-[75.56%_9.59%_21.89%_88.03%]"><div class="absolute inset-[-40%_-27.78%]"><img alt="" class="block max-w-none size-full" src="assets/emo_blob5.svg"></div></div>
+    <div class="absolute inset-[87.58%_9.99%_9.67%_88.43%]"><div class="absolute inset-[-37.04%_-41.67%_-37.04%_-41.68%]"><img alt="" class="block max-w-none size-full" src="assets/emo_blob3.svg"></div></div>
+    <div class="absolute inset-[93.58%_9.79%_3.97%_88.43%]"><div class="absolute inset-[-41.67%_-37.04%]"><img alt="" class="block max-w-none size-full" src="assets/emo_blob1.svg"></div></div>
+    <div class="absolute inset-[81.57%_10.19%_15.38%_88.03%]"><div class="absolute inset-[-33.33%_-37.04%_-33.33%_-37.03%]"><img alt="" class="block max-w-none size-full" src="assets/emo_blob4.svg"></div></div>
+    <div class="absolute inset-[69.55%_9.52%_28.21%_88.1%]"><div class="absolute inset-[-45.45%_-27.76%_-45.46%_-27.78%]"><img alt="" class="block max-w-none size-full" src="assets/emo_blob2.svg"></div></div>
+    <p class="absolute m-0 font-medium inset-[69.55%_9.66%_28.62%_88.03%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">~50%</p>
+    <p class="absolute m-0 font-medium inset-[75.97%_9.72%_22.2%_88.03%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">~10%</p>
+    <p class="absolute m-0 font-medium inset-[81.77%_9.66%_16.4%_88.1%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">~10%</p>
+    <p class="absolute m-0 font-medium inset-[87.58%_9.79%_10.59%_88.03%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">~15%</p>
+    <p class="absolute m-0 font-medium inset-[93.89%_9.72%_4.28%_88.1%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">~15%</p>
+    <p class="absolute m-0 font-medium inset-[69.55%_3.7%_28.62%_91.8%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">Visible Smile</p>
+    <p class="absolute m-0 font-medium inset-[75.87%_3.37%_22.3%_91.87%] leading-[1.28] text-[14px] tracking-[-0.308px]">Laughter</p>
+    <p class="absolute m-0 font-medium inset-[81.77%_1.32%_16.4%_91.8%] leading-[1.28] text-[14px] tracking-[-0.308px] whitespace-nowrap">Neutral Expression</p>
+    <p class="absolute m-0 font-medium inset-[87.58%_3.44%_10.59%_91.8%] leading-[1.28] text-[14px] tracking-[-0.308px]">Relaxed</p>
+    <p class="absolute m-0 font-medium inset-[93.89%_3.44%_4.28%_91.8%] leading-[1.28] text-[14px] tracking-[-0.308px]">Curiosity</p>
+    </div>
+    <button class="blob legend-btn absolute flex h-[105.929px] items-center justify-center left-[29px] top-[508px] w-[106.205px]" data-legend="emotion" aria-label="Show legend" aria-pressed="false" title="Legend">
+      <div class="flex-none rotate-[-44.09deg]"><div class="h-[68.865px] opacity-60 relative w-[81.155px] overflow-hidden">
+        <img alt="" class="absolute h-[208.77%] left-[-36.29%] max-w-none top-[-61.67%] w-[177.11%]" src="assets/src52.png">
+      </div></div>
+    </button>
+    <h2 class="title">Emotion/Facial Expression</h2>
+    <p class="subtitle">Visible smiles, laughter, neutral expression, relaxed, and curiosity</p>
+  </div>
+
+  <!-- 4 · movement legend + title -->
+  <div class="layer" data-for="movement">
+    <div class="legend absolute inset-0" id="legend-movement">
+{{MV_LEGEND}}
+    </div>
+    <h2 class="title">Movement</h2>
+    <p class="subtitle">People’s Walking Path Around The Sculpture And The Surrounding</p>
+  </div>
+
+  <!-- ===== the six blob buttons ===== -->
+  <button class="blob absolute aspect-[164.7187/164.6265] flex items-center justify-center left-[25.73%] right-[63.38%] top-[71px]" style="container-type:size" data-go="history" aria-label="History" title="History">
+    <div class="flex-none h-[hypot(53.5102cqw,53.0875cqh)] rotate-[-45.24deg] w-[hypot(46.4898cqw,-46.9125cqh)]"><div class="opacity-60 relative size-full"><div class="absolute inset-0 overflow-hidden">
+      <img alt="" class="absolute h-[175.5%] left-[-48.4%] max-w-none top-[-44.37%] w-[200.25%]" src="assets/src22.png">
+    </div></div></div>
+  </button>
+  <button class="blob absolute flex h-[174.99px] items-center justify-center left-[56px] top-[392px] w-[175.446px]" data-go="emotion" aria-label="Emotion / facial expression" title="Emotion">
+    <div class="flex-none rotate-[-44.09deg]"><div class="h-[113.762px] opacity-60 relative w-[134.065px] overflow-hidden">
+      <img alt="" class="absolute h-[208.77%] left-[-36.29%] max-w-none top-[-61.67%] w-[177.11%]" src="assets/src52.png">
+    </div></div>
+  </button>
+  <button class="blob absolute flex h-[117.535px] items-center justify-center left-[391px] top-[824px] w-[132.888px]" data-go="duration" aria-label="Duration" title="Duration">
+    <div class="flex-none rotate-[-89.05deg]"><div class="h-[130.994px] opacity-60 relative w-[115.381px] overflow-hidden">
+      <img alt="" class="absolute h-[150.34%] left-[-38.07%] max-w-none top-[-29.92%] w-[170.64%]" src="assets/src42.png">
+    </div></div>
+  </button>
+  <button class="blob absolute aspect-[192.3825/195.1034] flex items-center justify-center left-[66.93%] right-[20.35%] top-[757px]" style="container-type:size" data-go="movement" aria-label="Movement" title="Movement">
+    <div class="flex-none h-[hypot(-40.1956cqw,62.7556cqh)] rotate-[32.28deg] w-[hypot(59.8044cqw,37.2444cqh)]"><div class="opacity-60 relative size-full"><div class="absolute inset-0 overflow-hidden">
+      <img alt="" class="absolute h-[182.43%] left-[-49.66%] max-w-none top-[-49.7%] w-[194.09%]" src="assets/src33.png">
+    </div></div></div>
+  </button>
+  <button class="blob absolute flex h-[174.375px] items-center justify-center left-[1279px] top-[384px] w-[174.216px]" data-go="group" aria-label="Group size" title="Group size">
+    <div class="flex-none rotate-[-44.33deg]"><div class="h-[128.049px] opacity-60 relative w-[118.459px] overflow-hidden">
+      <img alt="" class="absolute h-[179.1%] left-[-48.58%] max-w-none top-[-43.02%] w-[193.55%]" src="assets/srcs6.png">
+    </div></div>
+  </button>
+  <button class="blob absolute aspect-[200.8328/191.1375] flex items-center justify-center left-[62.9%] right-[23.82%] top-[50px]" style="container-type:size" data-go="touch" aria-label="Physical touch" title="Physical touch">
+    <div class="flex-none h-[hypot(-28.994cqw,65.0698cqh)] rotate-[25.09deg] w-[hypot(71.006cqw,34.9302cqh)]"><div class="opacity-60 relative size-full"><div class="absolute inset-0 overflow-hidden">
+      <img alt="" class="absolute h-[188.97%] left-[-33.81%] max-w-none top-[-51.16%] w-[164.77%]" src="assets/src697.png">
+    </div></div></div>
+  </button>
+
+  <!-- small button beside "movement": toggles its legend -->
+  <div class="layer" data-for="movement">
+    <button class="blob legend-btn" data-legend="movement" aria-label="Show legend" aria-pressed="false" title="Legend"
+            style="left:1145px;top:781px;width:110px;height:110.7px">
+{{MV_TOGGLE}}
+    </button>
+  </div>
+
+
+  <!-- 1 · history -->
+  <div class="layer" data-for="history" id="history">
+    <div id="hist-circle" role="dialog" aria-modal="false" aria-label="History of Circle Dance">
+      <div class="hist-backdrop" aria-hidden="true"><div class="hb-art">
+        <img alt="" src="assets/grass2.svg" style="left:236px;top:220px;width:1012px;height:632px">
+        <img alt="" src="assets/sculpt_glow.png" style="left:244px;top:255px;width:1052px;height:571px">
+        <img alt="" src="assets/sculpt_body.png" style="left:247.1px;top:258.06px;width:1045.9px;height:565.1px">
+      </div></div>
+      <!-- coordinates inside the circle are artboard coords minus (397,194) -->
+      <div class="slide on" data-n="0">
+        <div class="slide-body">
+          <h3 class="slide-head">THE SCULPTURE</h3>
+          <p class="slide-text">Created in 2010, Circle Dance consists of eleven life-size figures holding hands in a circle. Installed at Brown University in 2012, the sculpture brings a sense of movement and energy to the campus.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="1">
+        <div class="slide-body">
+          <h3 class="slide-head">THE INSPIRATION</h3>
+          <p class="slide-text" style="max-width:420px">Inspired by Henri Matisse’s La Danse (1910), the sculpture echoes the painting’s circular arrangement of dancing figures. Their linked hands can be interpreted as symbols of unity, movement, and shared experience.</p>
+        </div>
+      </div>
+      <div class="slide" data-n="2">
+        <div class="slide-body">
+          <h3 class="slide-head">THE ARTIST <span class="amp">&amp;</span> MATERIAL</h3>
+          <p class="slide-text" style="max-width:399px;font-size:25px;line-height:1.5;letter-spacing:-0.55px">Tom Friedman is a conceptual sculptor known for transforming everyday materials. He originally modeled Circle Dance using aluminum roasting pans, preserving their impressions in the final stainless-steel sculpture.</p>
+        </div>
+      </div>
+
+      <button class="icon-btn" id="hist-prev" aria-label="Previous" style="left:22px;top:334px"><img alt="" src="assets/icon_chevron.svg" style="transform:rotate(180deg)"></button>
+      <button class="icon-btn" id="hist-next" aria-label="Next" style="left:672px;top:334px"><img alt="" src="assets/icon_chevron.svg"></button>
+      <button class="icon-btn" id="hist-close" aria-label="Close" style="left:339px;top:667px;width:33px;height:34px"><img alt="" src="assets/icon_x.svg"></button>
+    </div>
+    <h2 class="title">History</h2>
+    <p class="subtitle">Historical Information About Circle Dance</p>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const W = 1512, H = 982;
+  const stage = document.getElementById('stage');
+  let scale = 1;
+  function fit() {
+    scale = Math.min(innerWidth / W, innerHeight / H);
+    stage.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }
+  addEventListener('resize', fit); fit();
+
+  /* click sound on every button (blobs, legend blobs, logo/title, history arrows and close) */
+  const clickSound = new Audio('assets/click.mp3');
+  clickSound.preload = 'auto';
+  document.addEventListener('click', e => {
+    if (!e.target.closest('button, #brand-title')) return;
+    const s = clickSound.cloneNode();          // a fresh copy so quick clicks can overlap
+    s.volume = 0.8;
+    s.play().catch(() => {});
+  }, true);
+
+  /* ear: crickets + people talking, both looping together; click again to stop */
+  const ambience = ['assets/crickets.m4a', 'assets/people-talking.m4a'].map(src => {
+    const a = new Audio(src); a.loop = true; a.preload = 'auto'; a.volume = 0; return a;
+  });
+  const AMBIENT_VOL = [0.7, 0.55];
+  const earBtn = document.getElementById('ear');
+  let earOn = false, fadeRaf;
+  function fadeTo(target, ms, done) {
+    cancelAnimationFrame(fadeRaf);
+    const from = ambience.map(a => a.volume), t0 = performance.now();
+    const tick = now => {
+      const k = Math.min(1, Math.max(0, (now - t0) / ms));
+      ambience.forEach((a, i) => { a.volume = Math.min(1, Math.max(0, from[i] + ((target ? AMBIENT_VOL[i] : 0) - from[i]) * k)); });
+      if (k < 1) fadeRaf = requestAnimationFrame(tick); else if (done) done();
+    };
+    fadeRaf = requestAnimationFrame(tick);
+  }
+  function setEar(on) {
+    if (on === earOn) return;
+    earOn = on;
+    earBtn.setAttribute('aria-pressed', String(earOn));
+    earBtn.setAttribute('aria-label', earOn ? 'Stop ambient sound' : 'Play ambient sound');
+    if (earOn) { ambience.forEach(a => a.play().catch(() => {})); fadeTo(true, 1200); }
+    else fadeTo(false, 800, () => ambience.forEach(a => a.pause()));
+  }
+  earBtn.addEventListener('click', () => setEar(!earOn));
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) document.getElementById('emo-fill').pauseAnimations();   // hold the emotion gradients still
+  const body = document.body;
+  const blobs = [...document.querySelectorAll('.blob[data-go]')];
+
+  /* Data layers stack: each blob turns its own infographic on or off, so several can be
+     layered at once. History is a pop-up on top of whatever is showing. The heading shows
+     the most recently opened layer. */
+  const active = [];                      // open data layers, oldest first
+  let historyOpen = false;
+  function render() {
+    for (const b of blobs) {
+      const n = b.dataset.go;
+      const on = n === 'history' ? historyOpen : active.includes(n);
+      body.classList.toggle('on-' + n, on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+    body.classList.toggle('none-on', !active.length && !historyOpen);
+    body.dataset.top = historyOpen ? 'history' : (active[active.length - 1] || 'home');
+  }
+  function toggle(n) {
+    if (n === 'history') { historyOpen = !historyOpen; if (historyOpen) show(0); return render(); }
+    const i = active.indexOf(n);
+    if (i >= 0) { active.splice(i, 1); leave(n); } else { active.push(n); enter(n); }
+    render();
+  }
+  function clearAll() {
+    historyOpen = false;
+    while (active.length) leave(active.pop());
+    render();
+  }
+  blobs.forEach(b => b.addEventListener('click', () => toggle(b.dataset.go)));
+  // logo: hovering turns it into the title; clicking it clears every open layer (back to the start screen)
+  const logoBtn = document.getElementById('home-link');
+  const peek = on => body.classList.toggle('peek-on', on);
+  const heroTitle = document.getElementById('brand-title');
+  // hover is tracked on the wrapper so moving from the logo onto the title doesn't flicker
+  const brand = document.getElementById('brand');
+  brand.addEventListener('pointerenter', () => peek(true));
+  brand.addEventListener('pointerleave', () => peek(false));
+  logoBtn.addEventListener('click', clearAll);
+  heroTitle.addEventListener('click', clearAll);
+  logoBtn.addEventListener('focus', () => peek(true));
+  logoBtn.addEventListener('blur', () => peek(false));
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape') { if (historyOpen) toggle('history'); else clearAll(); }
+    if (historyOpen) {
+      if (e.key === 'ArrowRight') go(1);
+      if (e.key === 'ArrowLeft') go(-1);
+    }
+  });
+
+  function enter(s) {
+    if (s === 'movement') requestAnimationFrame(walk);
+    if (s === 'group') { clearTimeout(enter.t); enter.t = setTimeout(() => body.classList.add('grp-spin'), reduce ? 0 : 6400); }
+  }
+  function leave(s) {
+    if (s === 'movement') stopWalk();
+    legend(s, false);
+    if (s === 'group') { clearTimeout(enter.t); body.classList.remove('grp-spin'); }
+  }
+
+  /* ---------- history slides ---------- */
+  const slides = [...document.querySelectorAll('.slide')];
+  let cur = 0;
+  function show(n) {
+    cur = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((el, i) => el.classList.toggle('on', i === cur));
+    document.getElementById('hist-prev').style.visibility = cur === 0 ? 'hidden' : 'visible';
+    document.getElementById('hist-next').style.visibility = cur === slides.length - 1 ? 'hidden' : 'visible';
+  }
+  const go = d => show(cur + d);
+  document.getElementById('hist-prev').addEventListener('click', () => go(-1));
+  document.getElementById('hist-next').addEventListener('click', () => go(1));
+  document.getElementById('hist-close').addEventListener('click', () => toggle('history'));
+
+  /* ---------- movement: footprints walk outward from the sculpture ---------- */
+  const steps = [...document.querySelectorAll('#mv .fp-step')];
+  const C = { x: 770, y: 540 };          // centre of the sculpture on the artboard
+  let anims = [];
+  function stopWalk() { anims.forEach(a => a.cancel()); anims = []; }
+  function walk() {
+    stopWalk();
+    const sr = stage.getBoundingClientRect();
+    const pts = steps.map(el => {
+      const r = el.getBoundingClientRect();
+      return { el, x: (r.left + r.width / 2 - sr.left) / scale, y: (r.top + r.height / 2 - sr.top) / scale };
+    });
+    // denser areas (overlapping paths) walk a little faster
+    pts.forEach(p => {
+      p.d = Math.hypot(p.x - C.x, p.y - C.y);
+      p.n = pts.reduce((k, q) => k + (q !== p && Math.hypot(q.x - p.x, q.y - p.y) < 70), 0);
+    });
+    const maxD = Math.max(...pts.map(p => p.d));
+    const STEP = 1100, SPREAD = 5200;
+    const byUnit = new Map();
+    pts.forEach(p => {
+      const pace = 1 / (1 + 0.06 * p.n);
+      const delay = reduce ? 0 : (p.d / maxD) * SPREAD * (0.55 + 0.45 * pace);
+      anims.push(p.el.animate(
+        [{ opacity: 0 }, { opacity: 1, offset: .3 }, { opacity: .22 }],
+        { duration: reduce ? 1 : STEP, delay, fill: 'forwards', easing: 'ease-in-out' }));
+      const u = p.el.closest('.fp-unit');
+      byUnit.set(u, Math.max(byUnit.get(u) || 0, delay + STEP));
+    });
+    // once a path has been walked, its footprints settle into the final arrangement
+    pts.forEach(p => {
+      const end = byUnit.get(p.el.closest('.fp-unit'));
+      anims.push(p.el.animate([{ opacity: .22 }, { opacity: 1 }],
+        { duration: reduce ? 1 : 900, delay: end + 200, fill: 'forwards', easing: 'ease-out' }));
+    });
+  }
+
+  /* ---------- legends: each view's small blob shows / hides its legend ---------- */
+  const LEGENDS = ['emotion', 'duration', 'movement', 'group', 'touch'];
+  function legend(name, on) {
+    // the legends share the bottom-right corner, so only one is open at a time
+    if (on) LEGENDS.filter(n => n !== name).forEach(n => legend(n, false));
+    const el = document.getElementById('legend-' + name);
+    el.classList.toggle('on', on);
+    document.querySelectorAll(`.legend-btn[data-legend="${name}"]`).forEach(b => {
+      b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', on ? 'Hide legend' : 'Show legend');
+    });
+  }
+  document.querySelectorAll('.legend-btn').forEach(b => b.addEventListener('click', () => {
+    const name = b.dataset.legend;
+    legend(name, !document.getElementById('legend-' + name).classList.contains('on'));
+  }));
+})();
+</script>
+</body>
+</html>
