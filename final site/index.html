@@ -57,14 +57,10 @@
 
 
   /* ---------- 6 · physical touch ---------- */
-  .tring { position: absolute; transform-origin: center; animation: flash 3.2s ease-in-out infinite; }
-  .tring img { width: 100%; height: 100%; display: block; }
-  @keyframes flash {
-    0%, 100% { opacity: .15; transform: scale(.55); }
-    35%      { opacity: 1;   transform: scale(1); }
-    70%      { opacity: .55; transform: scale(.9); }
-  }
-  .spot { position: absolute; border-radius: 50%; cursor: default; }
+  /* one steady glow per body part, sized by the legend step its share falls in (set in the script) */
+  .spot { position: absolute; border-radius: 50%; cursor: default; translate: -50% -50%;
+          background: url(assets/touch_e104.svg) center / 100% 100% no-repeat;
+          transition: width 600ms ease, height 600ms ease; }
   .spot-label { position: absolute; width: 98px; text-align: center; font-weight: 500; font-size: 14px;
                 line-height: 1.28; letter-spacing: -0.308px; opacity: 0; transform: translateY(-4px);
                 transition: opacity 250ms, transform 250ms; pointer-events: none; }
@@ -120,9 +116,10 @@
   body.night .grp:has(img[src$="grp_F5.svg"]), body.night .grp:has(img[src$="grp_F10.svg"]),
   body.night .grp:has(img[src$="grp_F8.svg"]), body.night .grp:has(img[src$="grp_F9.svg"]) { display: none; }
   /* what's on: one chip per open view (newest at the bottom); clicking a chip turns that view off again */
-  #showing { position: absolute; right: 36px; top: 112px; z-index: 12; display: flex; flex-direction: column; align-items: flex-end;
+  /* top-right cluster: switch, collection time and the 'showing' chips share one right edge (36px in) */
+  #showing { position: absolute; right: 36px; top: 168px; z-index: 12; display: flex; flex-direction: column; align-items: flex-end;
              gap: 6px; transition: opacity 300ms; }
-  #showing .lbl { font: 300 13px/1 'MuseoModerno', sans-serif; color: #000; margin-bottom: 2px; transition: color 700ms ease; }
+  #showing .lbl { font: 300 20px/1 'MuseoModerno', sans-serif; color: #000; margin-bottom: 2px; transition: color 700ms ease; }
   body.night #showing .lbl { color: #fff; }
   #showing .chip { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 14px; border: 1px solid #000; border-radius: 999px;
                    background: rgba(255,255,255,.85); color: #000; font: 300 15px/1 'MuseoModerno', sans-serif; cursor: pointer;
@@ -135,7 +132,7 @@
   @keyframes chip-in { from { opacity: 0; transform: translateX(10px); } }
   body:is(.decorating, .gallery-open) #showing { opacity: 0; pointer-events: none; }
   /* the switch: a thin-line moon by day (go to night), a sun by night (go to day) */
-  #daynight { position: absolute; left: 1446px; top: 48px; width: 34px; height: 34px; z-index: 12; padding: 0; border: 0;
+  #daynight { position: absolute; left: 1442px; top: 46px; width: 34px; height: 34px; z-index: 12; padding: 0; border: 0;
               background: none; cursor: pointer; transition: transform 350ms cubic-bezier(.3,1.6,.5,1), opacity 300ms; }
   #daynight:hover { transform: rotate(-15deg) scale(1.12); }
   #daynight:focus-visible { outline: 2px dashed var(--leaf); outline-offset: 4px; border-radius: 50%; }
@@ -143,10 +140,13 @@
   #daynight .sun { display: none; }
   body.night #daynight .sun { display: inline; }
   body.night #daynight .moon { display: none; }
-  #daynight-label { position: absolute; left: 1463px; top: 92px; transform: translateX(-50%); margin: 0; z-index: 12;
-                    font: 300 15px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0; transition: opacity 200ms; pointer-events: none; }
+  #daynight-time { position: absolute; right: 36px; top: 90px; margin: 0; z-index: 12; text-align: right;
+                   font: 300 15px/1.35 'MuseoModerno', sans-serif; color: #000; transition: color 700ms ease, opacity 300ms; }
+  body.night #daynight-time { color: #fff; }
+  #daynight-label { position: absolute; right: 80px; top: 53px; margin: 0; z-index: 12;
+                    font: 300 20px/1 'MuseoModerno', sans-serif; color: #000; opacity: 0; transition: opacity 200ms; pointer-events: none; }
   #daynight:hover + #daynight-label, #daynight:focus-visible + #daynight-label { opacity: 1; }
-  body:is(.decorating, .gallery-open) :is(#daynight, #daynight-label) { opacity: 0; pointer-events: none; }
+  body:is(.decorating, .gallery-open) :is(#daynight, #daynight-label, #daynight-time) { opacity: 0; pointer-events: none; }
   .emo-sheet { position: absolute; inset: 0; }
   .emo-icon { position: absolute; transform-origin: 50% 50%; }
   .emo-icon img { display: block; width: 100%; height: 100%; }
@@ -348,7 +348,7 @@
   @keyframes ear-wave { from { opacity: .8; transform: scale(.6); } to { opacity: 0; transform: scale(1.9); } }
 
   @media (prefers-reduced-motion: reduce) {
-    .tring, .spin { animation: none !important; }
+    .spin { animation: none !important; }
     #ring-label { transition: opacity 200ms ease; }
   }
 </style>
@@ -392,6 +392,7 @@
     </svg>
   </button>
   <p id="daynight-label" aria-hidden="true">night</p>
+  <p id="daynight-time"><span class="hrs">data collected from 8am to 12pm</span><br>on 10/9/2026</p>
 
   <!-- the views that are on right now; click one to turn it off -->
   <div id="showing" aria-label="Views that are on" aria-live="polite"></div>
@@ -622,34 +623,22 @@
 
   <!-- 6 · physical touch -->
   <div class="layer" data-for="touch">
-    <!-- hand: three stacked rings (most touched) -->
-    <div class="tring left-[443px] top-[503px] w-[114px] h-[114px]" style="animation-delay:0s"><img alt="" src="assets/touch_e104.svg"></div>
-    <div class="tring left-[449px] top-[509px] w-[101px] h-[101px]" style="animation-delay:.25s"><img alt="" src="assets/touch_e102.svg"></div>
-    <div class="tring left-[457px] top-[517px] w-[85px] h-[85px]" style="animation-delay:.5s"><img alt="" src="assets/touch_e103.svg"></div>
-    <!-- head: two rings -->
-    <div class="tring day-only left-[759.5px] top-[217.5px] w-[101px] h-[101px]" style="animation-delay:.9s"><img alt="" src="assets/touch_e102.svg"></div>
-    <div class="tring left-[767.5px] top-[225.5px] w-[85px] h-[85px]" style="animation-delay:1.15s"><img alt="" src="assets/touch_e103.svg"></div>
-    <!-- torso / other: single rings -->
-    <div class="tring left-[597.5px] top-[612.5px] w-[85px] h-[85px]" style="animation-delay:1.6s"><img alt="" src="assets/touch_e103.svg"></div>
-    <div class="tring left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" style="animation-delay:2.1s"><img alt="" src="assets/touch_e103.svg"></div>
-
-    <div class="spot left-[443px] top-[503px] w-[114px] h-[114px]" tabindex="0" aria-label="Hand" data-day="42%" data-night="51%"></div>
-    <p class="spot-label left-[450px] top-[617px] m-0">Hand<br><span class="d">42%</span><span class="n">51%</span></p>
-    <div class="spot left-[759.5px] top-[217.5px] w-[101px] h-[101px]" tabindex="0" aria-label="Head" data-day="28%" data-night="17%"></div>
-    <p class="spot-label left-[759.5px] top-[321.5px] m-0">Head<br><span class="d">28%</span><span class="n">17%</span></p>
-    <div class="spot left-[597.5px] top-[612.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Torso" data-day="18%" data-night="22%"></div>
-    <p class="spot-label left-[588.5px] top-[697.5px] m-0">Torso<br><span class="d">18%</span><span class="n">22%</span></p>
-    <div class="spot left-[1012.5px] top-[647.5px] w-[85px] h-[85px]" tabindex="0" aria-label="Other" data-day="12%" data-night="10%"></div>
-    <p class="spot-label left-[1006.5px] top-[734.5px] m-0">Other<br><span class="d">12%</span><span class="n">10%</span></p>
+    <div class="spot" style="left:500px;top:560px" tabindex="0" aria-label="Hand 42%" data-day="42%" data-night="51%"></div>
+    <p class="spot-label m-0" style="left:451px">Hand<br><span class="d">42%</span><span class="n">51%</span></p>
+    <div class="spot" style="left:810px;top:268px" tabindex="0" aria-label="Head 28%" data-day="28%" data-night="17%"></div>
+    <p class="spot-label m-0" style="left:761px">Head<br><span class="d">28%</span><span class="n">17%</span></p>
+    <div class="spot" style="left:640px;top:655px" tabindex="0" aria-label="Torso 18%" data-day="18%" data-night="22%"></div>
+    <p class="spot-label m-0" style="left:591px">Torso<br><span class="d">18%</span><span class="n">22%</span></p>
+    <div class="spot" style="left:1055px;top:690px" tabindex="0" aria-label="Other 12%" data-day="12%" data-night="10%"></div>
+    <p class="spot-label m-0" style="left:1006px">Other<br><span class="d">12%</span><span class="n">10%</span></p>
 
     <!-- legend (shown while this is the most recent view) -->
     <div class="legend absolute inset-0" id="legend-touch">
       <div class="legend-card" role="img" aria-label="Legend: the bigger the glow, the more often people touched there">
-        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:30px"></span><span class="tx">80–100%</span>
-        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:25px"></span><span class="tx">60–80%</span>
-        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:20px"></span><span class="tx">40–60%</span>
-        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:15px"></span><span class="tx">20–40%</span>
-        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:10px"></span><span class="tx">0–20%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:30px"></span><span class="tx">40%+</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:23px"></span><span class="tx">20–40%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:16px"></span><span class="tx">15–20%</span>
+        <span class="sw"><img alt="" src="assets/touch_e104.svg" style="width:10px"></span><span class="tx">under 15%</span>
       </div>
     </div>
     <h2 class="title">Physical Touch</h2>
@@ -973,9 +962,8 @@
     dnBtn.setAttribute('aria-pressed', String(on));
     dnBtn.setAttribute('aria-label', on ? 'Show the day data' : 'Show the night data');
     dnLabel.textContent = on ? 'day' : 'night';
-    document.querySelectorAll('.spot[data-day]').forEach(el => {
-      el.setAttribute('aria-label', el.getAttribute('aria-label').split(' ')[0] + ' ' + (on ? el.dataset.night : el.dataset.day));
-    });
+    document.querySelector('#daynight-time .hrs').textContent = on ? 'data collected from 8pm to 12am' : 'data collected from 8am to 12pm';
+    sizeSpots();
     // group size: lavender shapes by day, the original green at night
     document.querySelectorAll('.layer[data-for="group"] img[src*="grp_"]').forEach(img => {
       const name = img.getAttribute('src').split('/').pop();
@@ -986,6 +974,19 @@
     if (earOn) fadeTo(true, 1500);                                    // crossfade to the other mode's sound
   }
   dnBtn.addEventListener('click', () => setNight(!night));
+
+  /* physical touch: each glow takes the size of its legend step (the legend's swatches × 5) */
+  const TOUCH_STEPS = [[40, 150], [20, 115], [15, 80], [0, 50]];   // [from %, diameter px], matching the legend
+  function sizeSpots() {
+    document.querySelectorAll('.spot[data-day]').forEach(el => {
+      const pct = parseFloat(night ? el.dataset.night : el.dataset.day);
+      const d = TOUCH_STEPS.find(([from]) => pct >= from)[1];
+      el.style.width = el.style.height = d + 'px';
+      el.nextElementSibling.style.top = (parseFloat(el.style.top) + d / 2 + 4) + 'px';
+      el.setAttribute('aria-label', el.getAttribute('aria-label').split(' ')[0] + ' ' + pct + '%');
+    });
+  }
+  sizeSpots();
 
   const body = document.body;
   const dots = [...document.querySelectorAll('.dot[data-go]')];
@@ -1196,6 +1197,7 @@
   /* ---------- keep every data shape whole: anything that pokes past the edge of the frame is slid inward
      just far enough to sit fully inside it (shapes that spin get room for their whole turn) ---------- */
   const EDGE = 12;                              // px kept clear between a shape and the frame's edge
+  const CORNER = { x: 1220, y: 200 };           // top-right text (switch, collection time, 'showing') stays uncovered
   function keepInside() {
     // measure with the parallax at rest, so a passing mouse offset doesn't skew the check
     body.classList.add('parallax-rest');
@@ -1219,8 +1221,12 @@
         const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rad = Math.hypot(x1 - x0, y1 - y0) / 2;
         x0 = cx - rad; x1 = cx + rad; y0 = cy - rad; y1 = cy + rad;
       }
-      const dx = x0 < EDGE ? EDGE - x0 : x1 > W - EDGE ? W - EDGE - x1 : 0;
-      const dy = y0 < EDGE ? EDGE - y0 : y1 > H - EDGE ? H - EDGE - y1 : 0;
+      let dx = x0 < EDGE ? EDGE - x0 : x1 > W - EDGE ? W - EDGE - x1 : 0;
+      let dy = y0 < EDGE ? EDGE - y0 : y1 > H - EDGE ? H - EDGE - y1 : 0;
+      if (x1 + dx > CORNER.x && y0 + dy < CORNER.y) {   // overlaps the corner: slide left or down, whichever is shorter
+        const left = CORNER.x - (x1 + dx), down = CORNER.y - (y0 + dy);
+        if (-left < down) dx += left; else dy += down;
+      }
       el.dataset.inside = `${dx} ${dy}`;
       el.style.translate = dx || dy ? `${dx.toFixed(1)}px ${dy.toFixed(1)}px` : '';
     }
