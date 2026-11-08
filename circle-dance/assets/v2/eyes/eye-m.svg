@@ -1,0 +1,17 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="89.5921" height="34.1901" viewBox="0 0 89.5921 34.1901" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Group 4">
+<g id="Layer_1" clip-path="url(#clip0_0_4)">
+<path id="Vector" d="M66.5221 29.87C72.8844 29.87 78.0421 23.6513 78.0421 15.98C78.0421 8.30881 72.8844 2.09005 66.5221 2.09005C60.1598 2.09005 55.0021 8.30881 55.0021 15.98C55.0021 23.6513 60.1598 29.87 66.5221 29.87Z" fill="url(#paint0_radial_0_4)"/>
+</g>
+<path id="Vector_2" d="M87.0921 2.50005C37.8321 4.82005 2.80209 9.20005 2.50209 16.3001C2.20209 23.4501 36.9321 28.3 87.0821 31.69" stroke="#6571BA" stroke-width="5" stroke-miterlimit="10" stroke-linecap="round"/>
+</g>
+<defs>
+<radialGradient id="paint0_radial_0_4" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(66.5221 15.98) scale(12.76)">
+<stop stop-color="#3D519E"/>
+<stop offset="1" stop-color="white"/>
+</radialGradient>
+<clipPath id="clip0_0_4">
+<rect width="23.03" height="27.78" fill="white" transform="translate(55.0021 2.09005)"/>
+</clipPath>
+</defs>
+</svg>
